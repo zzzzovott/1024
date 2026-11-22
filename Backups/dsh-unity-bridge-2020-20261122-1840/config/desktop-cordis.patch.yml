@@ -1,0 +1,29 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+- id: ui-chat
+  name: "@deepseek-ai/dsh-client-ui-chat"
+  config:
+    transcriptView: standard
+    performanceUsage: detailed
+- id: ui-settings
+  name: "@deepseek-ai/dsh-client-ui-settings"
+  config:
+    enabled: true
+- id: ui-settings-account
+  name: "@deepseek-ai/dsh-client-ui-settings-account"
+  config:
+    version: 1
+    step: done
+    usage: detailed
+    developerTools: true
+    purpose: null
+    process: standard
+    completion: api-key
+# Unity bridge: point the plugin at the local Unity 2020.3.49f1c1 install.
+# It lives in D:\Unity, outside the Hub roots the plugin scans on its own
+# (C:\Program Files\Unity\Hub\Editor, %LOCALAPPDATA%\Unity\Hub\Editor, ...),
+# so without this unity_open fails with no_editor_install.
+- id: unity-2022
+  config:
+    unityPath: D:/Unity/2020.3.49f1c1/Editor/Unity.exe

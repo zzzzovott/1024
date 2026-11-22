@@ -1,0 +1,8 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+# Unity bridge: point the plugin at the local Unity 2020.3.49f1c1 install
+# (D:\Unity is outside the Hub roots the plugin scans by itself).
+- id: unity-2022
+  config:
+    unityPath: D:/Unity/2020.3.49f1c1/Editor/Unity.exe
