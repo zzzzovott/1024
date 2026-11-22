@@ -135,18 +135,15 @@ namespace Move1024
             if (UnityEngine.EventSystems.EventSystem.current != null &&
                 UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
 
-            Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-            RaycastHit hit;
-            if (!Physics.Raycast(ray, out hit, 50f)) return;
-
-            DeskFocusInteractable it = hit.collider.GetComponentInParent<DeskFocusInteractable>();
-            if (it != null)
+            // 点击判定跟着准星走：屏幕中心正对着谁，就交互谁（准星已经替我们做完射线了）
+            if (_hovered != null)
             {
-                BeginFocus(it);
+                BeginFocus(_hovered);
                 return;
             }
 
-            if (contractHotspot != null && hit.collider.transform.IsChildOf(contractHotspot.transform))
+            if (contractHotspot != null && crosshair != null && crosshair.HoveredCollider != null &&
+                crosshair.HoveredCollider.transform.IsChildOf(contractHotspot.transform))
                 TryOpenContract();
         }
 
@@ -403,13 +400,9 @@ namespace Move1024
         {
             DeskFocusInteractable hitIt = null;
 
-            if ((state == State.Explore || state == State.Walking) && Camera.main != null)
-            {
-                Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-                RaycastHit hit;
-                if (Physics.Raycast(ray, out hit, 50f))
-                    hitIt = hit.collider.GetComponentInParent<DeskFocusInteractable>();
-            }
+            // 准星（屏幕中心射线）告诉我们正对着哪件旧物
+            if ((state == State.Explore || state == State.Walking) && crosshair != null)
+                hitIt = crosshair.HoveredInteractable;
 
             if (hitIt != _hovered)
             {
@@ -421,11 +414,9 @@ namespace Move1024
             if (crosshair != null)
             {
                 if (state == State.Desk && _current != null)
-                    crosshair.SetHover(true, string.IsNullOrEmpty(_current.deskHint) ? "按住左键拖动" : _current.deskHint);
-                else if (hitIt != null)
-                    crosshair.SetHover(true, string.IsNullOrEmpty(hitIt.hoverHint) ? "点击查看" : hitIt.hoverHint);
+                    crosshair.SetOverrideLabel(string.IsNullOrEmpty(_current.deskHint) ? "按住左键拖动" : _current.deskHint);
                 else
-                    crosshair.SetHover(false, "");
+                    crosshair.SetOverrideLabel(null);
             }
         }
 

@@ -29,6 +29,16 @@ namespace Move1024
         [Tooltip("跟随位移的最大幅度（米）")]
         public float followClamp = 0.9f;
 
+        [Header("环视（配合屏幕正中心准星）")]
+        [Tooltip("房间状态下允许小幅左右/上下看。关掉就是纯固定机位——那样屏幕中心永远只指着桌前一小块，电视之类的偏侧物件会瞄不到")]
+        public bool lookAround = true;
+        public float lookYawRange = 24f;
+        public float lookPitchRange = 14f;
+        public float lookSensitivity = 2.4f;
+        public float lookSmooth = 9f;
+        [Tooltip("按住左键时冻结环视：擦灰/拖拽要鼠标自由移动，不能同时带镜头")]
+        public bool freezeLookWhileDragging = true;
+
         Camera _cam;
         Vector3 _posVelocity;
         Vector3 _pivotVelocity;
@@ -38,6 +48,7 @@ namespace Move1024
         bool _snapNext;
         Vector3 _pivotOffset;
         Transform _dynamicAnchor;
+        float _lookYaw, _lookPitch, _lookYawSm, _lookPitchSm;
 
         public bool AtDesk { get { return _atDesk; } }
 
@@ -128,10 +139,15 @@ namespace Move1024
             _pivotOffset = Vector3.SmoothDamp(_pivotOffset, Vector3.zero, ref _pivotVelocity, 0.3f);
             wantPos += _pivotOffset;
 
+            UpdateLook();
+            Quaternion wantRot = target.rotation;
+            if (lookAround && !_atDesk)
+                wantRot = target.rotation * Quaternion.Euler(_lookPitchSm, _lookYawSm, 0f);
+
             if (_snapNext)
             {
                 transform.position = wantPos;
-                transform.rotation = target.rotation;
+                transform.rotation = wantRot;
                 if (_cam != null) _cam.fieldOfView = _atDesk ? deskFov : roomFov;
                 _snapNext = false;
                 return;
@@ -139,7 +155,7 @@ namespace Move1024
 
             transform.position = Vector3.SmoothDamp(transform.position, wantPos, ref _posVelocity, smoothTime);
             float k = 1f - Mathf.Exp(-rotateLerpSpeed * Time.deltaTime);
-            transform.rotation = Quaternion.Slerp(transform.rotation, target.rotation, k);
+            transform.rotation = Quaternion.Slerp(transform.rotation, wantRot, k);
 
             if (_cam != null)
             {
@@ -149,6 +165,26 @@ namespace Move1024
                     ref _fovVelocity,
                     smoothTime);
             }
+        }
+
+        /// <summary>房间状态下的环视偏移：鼠标移动带动镜头小幅转动，屏幕中心准星才有东西可瞄。</summary>
+        void UpdateLook()
+        {
+            if (lookAround && !_atDesk)
+            {
+                bool frozen = freezeLookWhileDragging && Input.GetMouseButton(0);
+                if (!frozen)
+                {
+                    _lookYaw = Mathf.Clamp(_lookYaw + Input.GetAxisRaw("Mouse X") * lookSensitivity,
+                        -lookYawRange, lookYawRange);
+                    _lookPitch = Mathf.Clamp(_lookPitch - Input.GetAxisRaw("Mouse Y") * lookSensitivity,
+                        -lookPitchRange, lookPitchRange);
+                }
+            }
+
+            float k = 1f - Mathf.Exp(-lookSmooth * Time.deltaTime);
+            _lookYawSm = Mathf.Lerp(_lookYawSm, _lookYaw, k);
+            _lookPitchSm = Mathf.Lerp(_lookPitchSm, _lookPitch, k);
         }
 
         /// <summary>可选：让桌面视角轻微把某个物件居中（用于物件不在正中时）。</summary>

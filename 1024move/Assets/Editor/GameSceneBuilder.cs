@@ -45,6 +45,14 @@ namespace Move1024.EditorTools
             Debug.Log("[1024] batch scene build done");
         }
 
+        /// <summary>同 BuildSceneMenu，但不弹确认框：给自动化 / 命令行用。</summary>
+        [MenuItem("1024/重建场景（不弹确认）", false, 4)]
+        public static void RebuildNoDialog()
+        {
+            BuildSceneCore();
+            Debug.Log("[1024] 场景已重建（不弹确认）");
+        }
+
         public static void BuildPlayerBatch()
         {
             BuildSceneCore();
@@ -269,7 +277,7 @@ namespace Move1024.EditorTools
             // 退租合同（三件旧物解完才能点）
             GameObject contract = new GameObject("Contract");
             contract.transform.SetParent(props.transform);
-            contract.transform.position = new Vector3(0.95f, 0.756f, 1.78f);
+            contract.transform.position = new Vector3(0.95f, 0.756f, 1.92f);
             MakeChild("Sheet", contract.transform, Vector3.zero, new Vector3(0.30f, 0.004f, 0.21f), paperMat);
 
             GameObject contractHit = new GameObject("Hitbox");
@@ -303,6 +311,103 @@ namespace Move1024.EditorTools
             AudioDirector audioDirector = audioGo.AddComponent<AudioDirector>();
             director.sfxSource = audioGo.AddComponent<AudioSource>();
             director.sfxSource.playOnAwake = false;
+
+            // ---------- 桌面灰尘（模块 2） ----------
+            // 三件旧物一开始被灰盖住：碰撞体先关掉，擦到 80% 后再由 DustErase 打开
+            foreach (var it in interactables)
+            {
+                Collider c = it.GetComponent<Collider>();
+                if (c != null) c.enabled = false;
+            }
+
+            Material dustMat = GetDustMaterial("M_Dust", GetDustTexture("dust_mask"));
+            GameObject dustQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            dustQuad.name = "DeskDust";
+            dustQuad.transform.position = new Vector3(0f, 0.878f, 2.2f);
+            dustQuad.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            dustQuad.transform.localScale = new Vector3(2.28f, 1.02f, 1f);
+            Renderer dustRend = dustQuad.GetComponent<Renderer>();
+            dustRend.sharedMaterial = dustMat;
+            dustRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            dustRend.receiveShadows = false;
+
+            // 擦灰时跟着鼠标走的小光斑，否则玩家看不见自己在擦哪
+            GameObject dustBrush = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            dustBrush.name = "DustBrush";
+            Object.DestroyImmediate(dustBrush.GetComponent<Collider>());
+            dustBrush.transform.localScale = new Vector3(0.26f, 0.26f, 1f);
+            Renderer brushRend = dustBrush.GetComponent<Renderer>();
+            brushRend.sharedMaterial = spotMat;
+            brushRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            dustBrush.SetActive(false);
+
+            DustErase dust = dustQuad.AddComponent<DustErase>();
+            dust.clearThreshold = 0.8f;          // 设计稿：擦掉 80%
+            dust.brushRadius = 30f;
+            dust.textureSize = 256;
+            dust.fadeDuration = 0.9f;
+            dust.player = pc;
+            dust.maxPlayerDistance = 2.8f;
+            dust.maxRayDistance = 9f;
+            dust.revealObjects = new[] { frog, tape, ticket };
+
+            // 桌面光斑是半透明（ZWrite Off），不关掉会"透"过同样半透明的灰尘显示出来
+            var dustSpots = new List<Renderer>();
+            foreach (var it in interactables)
+                if (it.lightSpot != null) dustSpots.Add(it.lightSpot);
+            dust.showAfterClear = dustSpots.ToArray();
+
+            dust.audio = audioDirector;
+            dust.brushMarker = dustBrush;
+            dust.hoverHint = "按住左键滑动，擦掉桌上的灰";
+
+            // ---------- 老电视（模块 3） ----------
+            GameObject tvRoot = new GameObject("Prop4_TV");
+            tvRoot.transform.SetParent(props.transform);
+            tvRoot.transform.position = new Vector3(-2.85f, 1.12f, 3.02f);
+
+            MakeBox("Stand", tvRoot.transform, new Vector3(0f, -0.62f, 0f), new Vector3(0.50f, 0.66f, 0.40f), woodMat);
+            MakeBox("Body", tvRoot.transform, Vector3.zero, new Vector3(0.86f, 0.58f, 0.50f), metalMat);
+
+            Material tvScreenMat = GetOrCreateEmissiveMaterial("M_TVScreen", new Color(0.16f, 0.18f, 0.23f));
+            GameObject tvScreen = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            tvScreen.name = "Screen";
+            tvScreen.transform.SetParent(tvRoot.transform, false);
+            tvScreen.transform.localPosition = new Vector3(0f, 0.02f, -0.255f);
+            tvScreen.transform.localScale = new Vector3(0.70f, 0.44f, 1f);
+            Object.DestroyImmediate(tvScreen.GetComponent<Collider>());
+            Renderer tvScreenRend = tvScreen.GetComponent<Renderer>();
+            tvScreenRend.sharedMaterial = tvScreenMat;
+            tvScreenRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            tvScreenRend.receiveShadows = false;
+
+            GameObject antL = MakeChild("AntennaL", tvRoot.transform, new Vector3(-0.12f, 0.40f, 0f), new Vector3(0.015f, 0.28f, 0.015f), metalMat);
+            antL.transform.localRotation = Quaternion.Euler(0f, 0f, 22f);
+            GameObject antR = MakeChild("AntennaR", tvRoot.transform, new Vector3(0.12f, 0.40f, 0f), new Vector3(0.015f, 0.28f, 0.015f), metalMat);
+            antR.transform.localRotation = Quaternion.Euler(0f, 0f, -22f);
+
+            GameObject tvSpotGo = new GameObject("Spot_TV");
+            tvSpotGo.transform.SetParent(lightRoot.transform);
+            tvSpotGo.transform.position = new Vector3(-2.35f, 1.60f, 2.50f);
+            Vector3 tvAim = new Vector3(-0.10f, 1.15f, 3.40f);
+            tvSpotGo.transform.rotation = Quaternion.LookRotation((tvAim - tvSpotGo.transform.position).normalized);
+            Light tvSpot = tvSpotGo.AddComponent<Light>();
+            tvSpot.type = LightType.Spot;
+            tvSpot.range = 9f;
+            tvSpot.spotAngle = 72f;
+            tvSpot.intensity = 0f;
+            tvSpot.color = new Color(0.82f, 0.88f, 1f);
+            tvSpot.shadows = LightShadows.Soft;
+
+            TVInteraction tv = tvRoot.AddComponent<TVInteraction>();
+            tv.spotLight = tvSpot;
+            tv.screenRenderer = tvScreenRend;
+            tv.audio = audioDirector;
+            tv.clickWindow = 1.5f;               // 设计稿：1.5 秒
+            tv.clicksRequired = 6;               // 设计稿：6 下
+            tv.lightOnIntensity = 10f;           // 设计稿：0 → 10
+            tv.lightHoldSeconds = 4f;            // 设计稿：维持 4 秒
+            tv.hoverHint = "点击拍打";
 
             // ---------- UI ----------
             Font uiFont = LoadUiFont();
@@ -631,6 +736,63 @@ namespace Move1024.EditorTools
             intro.black = introCg;
             intro.monologue = os;
             _pendingIntro = intro;
+
+            // --- 主菜单（V3.0 序章第 1 步：点击【开始游戏】） ---
+            RectTransform menuRt = NewRect(canvas.transform, "MainMenu");
+            StretchFull(menuRt);
+            Image menuBg = menuRt.gameObject.AddComponent<Image>();
+            menuBg.color = new Color(0.035f, 0.035f, 0.045f, 1f);
+            menuBg.raycastTarget = true;
+            CanvasGroup menuCg = menuRt.gameObject.AddComponent<CanvasGroup>();
+            menuCg.alpha = 1f;
+
+            Text menuTitle = NewText(menuRt, "Title", "第 1024 次 搬 家", 72,
+                new Color(0.95f, 0.93f, 0.88f, 1f), font);
+            Anchor(menuTitle.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 150f), new Vector2(1400f, 120f));
+            menuTitle.raycastTarget = false;
+
+            Text menuSub = NewText(menuRt, "Subtitle", "一 个 关 于 搬 家 的 记 忆", 30,
+                new Color(1f, 1f, 1f, 0.42f), font);
+            Anchor(menuSub.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 62f), new Vector2(1400f, 60f));
+            menuSub.raycastTarget = false;
+
+            RectTransform startRt = NewRect(menuRt, "StartButton");
+            Anchor(startRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -70f), new Vector2(360f, 88f));
+            Image startImg = startRt.gameObject.AddComponent<Image>();
+            startImg.color = new Color(1f, 1f, 1f, 0.14f);
+            Button startBtn = startRt.gameObject.AddComponent<Button>();
+            startBtn.targetGraphic = startImg;
+            ColorBlock sbc = startBtn.colors;
+            sbc.normalColor = new Color(1f, 1f, 1f, 0.14f);
+            sbc.highlightedColor = new Color(1f, 1f, 1f, 0.28f);
+            sbc.pressedColor = new Color(1f, 1f, 1f, 0.38f);
+            sbc.selectedColor = new Color(1f, 1f, 1f, 0.14f);
+            startBtn.colors = sbc;
+
+            Text startLabel = NewText(startRt, "Label", "开 始 游 戏", 34, new Color(1f, 1f, 1f, 0.9f), font);
+            StretchFull(startLabel.rectTransform);
+            startLabel.raycastTarget = false;
+
+            Text menuHint = NewText(menuRt, "Hint", "戴上耳机，点击开始", 24, new Color(1f, 1f, 1f, 0.3f), font);
+            Anchor(menuHint.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -210f), new Vector2(1000f, 50f));
+            menuHint.raycastTarget = false;
+
+            MainMenu menu = menuRt.gameObject.AddComponent<MainMenu>();
+            menu.panel = menuCg;
+            menu.startButton = startBtn;
+            menu.titleText = menuTitle;
+            menu.subtitleText = menuSub;
+            menu.hintText = menuHint;
+            menu.intro = intro;
+            menu.player = director.player;
+            menu.crosshair = cross;
+
+            // 开场改由主菜单触发（原来是一进场景就播）
+            intro.autoStart = false;
 
             // 准星要盖在开场黑幕之上
             chRt.SetAsLastSibling();
@@ -1029,6 +1191,46 @@ namespace Move1024.EditorTools
             tex.wrapMode = TextureWrapMode.Clamp;
             AssetDatabase.CreateAsset(tex, path);
             return tex;
+        }
+
+        /// <summary>桌面上那层灰的贴图：灰底 + 噪点 + 横向纤维。运行时 DustErase 会复制一份再擦。</summary>
+        static Texture2D GetDustTexture(string name)
+        {
+            EnsureFolder(TexDir);
+            string path = TexDir + "/" + name + ".asset";
+            Texture2D existing = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            if (existing != null) return existing;
+
+            const int size = 256;
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color32[] px = new Color32[size * size];
+            System.Random rng = new System.Random(20260101);
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float n = (float)rng.NextDouble();
+                    float fiber = Mathf.PerlinNoise(x * 0.05f, y * 0.55f);
+                    float v = 0.60f + n * 0.14f + fiber * 0.16f;
+                    byte c = (byte)Mathf.Clamp(v * 255f, 0f, 255f);
+                    px[y * size + x] = new Color32((byte)(c * 0.97f), (byte)(c * 0.94f), (byte)(c * 0.89f), 255);
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply();
+            tex.wrapMode = TextureWrapMode.Clamp;
+            AssetDatabase.CreateAsset(tex, path);
+            return tex;
+        }
+
+        /// <summary>灰尘材质：Sprites/Default（无光照、可透明、Cull Off），挂上灰尘贴图。</summary>
+        static Material GetDustMaterial(string name, Texture2D tex)
+        {
+            // 不用纯白：Sprites/Default 不吃光照；纯白像一块发亮的板子，太暗又和木桌面混在一起
+            Material m = GetTransparentMaterial(name, new Color(0.76f, 0.77f, 0.80f, 1f));
+            m.mainTexture = tex;
+            EditorUtility.SetDirty(m);
+            return m;
         }
     }
 }

@@ -4,35 +4,61 @@ using UnityEngine.UI;
 namespace Move1024
 {
     /// <summary>
-    /// 准星（跟随鼠标）。
+    /// 准星系统（设计稿 V3.0 第一部分）。
     ///
-    /// 设计稿写的是"屏幕中心白点"，但本作是 2.5D 固定机位 + 鼠标点击，
-    /// 屏幕中心的准星和鼠标会打架，所以改成**跟着鼠标走**：
-    /// 平时是一枚小圆环，指到可交互的东西上变成小手 + 文字提示。
-    /// 郑子涵做好手形图标后，直接拖进 handSprite 即可替换。
+    /// 固定钉在屏幕正中心：默认是一枚极小白点；主相机从屏幕中心发 Physics.Raycast，
+    /// 命中交互物时白点变成【小手】（有手形切图就用手形，没有则放大圆环代替）并显示操作提示；
+    /// 移开立刻恢复白点。
+    ///
+    /// 和旧版的区别：旧版准星跟着鼠标跑，那是为了让 2.5D 点击好点中；
+    /// 但本作是固定机位，鼠标真正需要负责的是"滑动擦灰 / 拖拽旋转"这类手势，
+    /// 瞄准交给屏幕中心反而更稳、更像第一人称的"看"。
     /// </summary>
     public class CrosshairUI : MonoBehaviour
     {
         [Header("外观")]
+        [Tooltip("手形图标（郑子涵的切图）。留空时就只放大圆环")]
         public Sprite handSprite;
         public Color idleColor = new Color(1f, 1f, 1f, 0.55f);
         public Color hoverColor = new Color(1f, 0.95f, 0.86f, 0.95f);
-        public float idleSize = 9f;
-        public float hoverSize = 26f;
-        public float followLerp = 28f;
+        public float idleSize = 10f;
+        public float hoverSize = 30f;
+        [Tooltip("悬停时圆环的呼吸幅度（0 = 不呼吸）")]
+        public float pulseAmount = 0.05f;
+        public float followLerp = 18f;
+
+        [Header("射线")]
+        [Tooltip("中心射线最远检测距离（米）")]
+        public float maxDistance = 12f;
+        [Tooltip("球扫描半径：固定机位下物件在屏幕上很小，纯射线太难瞄，给一点宽容度")]
+        public float castRadius = 0.25f;
+        public LayerMask rayMask = ~0;
+        [Tooltip("可选：给交互物打上这个标签，即使没有专用脚本也能识别；留空则只认脚本组件")]
+        public string interactableTag = "Interactable";
 
         [Header("提示文字")]
         public float labelFontSize = 20;
-        public Vector2 labelOffset = new Vector2(0f, -34f);
+        public Vector2 labelOffset = new Vector2(0f, -38f);
+        public float labelWidth = 520f;
+
+        [Header("系统光标")]
+        public bool hideSystemCursor = true;
+
+        /// <summary>当前中心射线命中的、可实现"点击查看"的旧物（Explore 阶段用）。</summary>
+        public DeskFocusInteractable HoveredInteractable { get; private set; }
+        /// <summary>当前中心射线命中的交互碰撞体：旧物 / 灰尘 / 电视 / 合同 Hitbox 都可能。</summary>
+        public Collider HoveredCollider { get; private set; }
+        public bool IsHovering { get { return HoveredCollider != null; } }
 
         Image _ring;
         Image _hand;
         Text _label;
         RectTransform _rt;
-        RectTransform _labelRt;
         float _size;
         bool _hover;
-        string _hoverLabel = "";
+        string _labelText = "";
+        string _overrideLabel;
+        bool _hasOverride;
 
         void Awake()
         {
@@ -42,15 +68,20 @@ namespace Move1024
                 gameObject.AddComponent<RectTransform>();
                 _rt = GetComponent<RectTransform>();
             }
+
+            // 钉死在画布中心：锚点、轴心、偏移全部归零，不跟随鼠标
             _rt.anchorMin = _rt.anchorMax = new Vector2(0.5f, 0.5f);
             _rt.pivot = new Vector2(0.5f, 0.5f);
+            _rt.anchoredPosition = Vector2.zero;
             _rt.sizeDelta = Vector2.zero;
+            _rt.localScale = Vector3.one;
 
             // 圆环
             GameObject ringGo = new GameObject("Ring", typeof(RectTransform));
             ringGo.transform.SetParent(transform, false);
             RectTransform ringRt = ringGo.GetComponent<RectTransform>();
             ringRt.anchorMin = ringRt.anchorMax = new Vector2(0.5f, 0.5f);
+            ringRt.anchoredPosition = Vector2.zero;
             ringRt.sizeDelta = new Vector2(idleSize, idleSize);
             _ring = ringGo.AddComponent<Image>();
             _ring.sprite = MakeRingSprite();
@@ -58,25 +89,26 @@ namespace Move1024
             _ring.raycastTarget = false;
             _size = idleSize;
 
-            // 手形图标（没有素材就先空着）
+            // 手形图标（没有素材就先空着，悬停时退化成"放大圆环"）
             GameObject handGo = new GameObject("Hand", typeof(RectTransform));
             handGo.transform.SetParent(transform, false);
             RectTransform handRt = handGo.GetComponent<RectTransform>();
             handRt.anchorMin = handRt.anchorMax = new Vector2(0.5f, 0.5f);
+            handRt.anchoredPosition = Vector2.zero;
             handRt.sizeDelta = new Vector2(hoverSize, hoverSize);
             _hand = handGo.AddComponent<Image>();
             _hand.raycastTarget = false;
             _hand.enabled = false;
             if (handSprite != null) _hand.sprite = handSprite;
 
-            // 提示文字
+            // 提示文字（挂在中心偏下）
             GameObject labelGo = new GameObject("Label", typeof(RectTransform));
             labelGo.transform.SetParent(transform, false);
-            _labelRt = labelGo.GetComponent<RectTransform>();
-            _labelRt.anchorMin = _labelRt.anchorMax = new Vector2(0.5f, 0.5f);
-            _labelRt.pivot = new Vector2(0.5f, 1f);
-            _labelRt.anchoredPosition = labelOffset;
-            _labelRt.sizeDelta = new Vector2(420f, 40f);
+            RectTransform labelRt = labelGo.GetComponent<RectTransform>();
+            labelRt.anchorMin = labelRt.anchorMax = new Vector2(0.5f, 0.5f);
+            labelRt.pivot = new Vector2(0.5f, 1f);
+            labelRt.anchoredPosition = labelOffset;
+            labelRt.sizeDelta = new Vector2(labelWidth, 40f);
 
             _label = labelGo.AddComponent<Text>();
             _label.font = RuntimeFont.Font;
@@ -90,12 +122,12 @@ namespace Move1024
             sh.effectColor = new Color(0f, 0f, 0f, 0.85f);
             sh.effectDistance = new Vector2(1.5f, -1.5f);
 
-            SetHover(false, "");
+            SetLook(false, "");
         }
 
         void Start()
         {
-            Cursor.visible = false;
+            if (hideSystemCursor) Cursor.visible = false;
         }
 
         void OnDestroy()
@@ -106,19 +138,26 @@ namespace Move1024
         void Update()
         {
             if (_rt == null) return;
-            _rt.position = Vector3.Lerp(_rt.position, Input.mousePosition, 1f - Mathf.Exp(-followLerp * Time.deltaTime));
 
-            float want = _hover ? hoverSize : idleSize;
-            _size = Mathf.Lerp(_size, want, 1f - Mathf.Exp(-16f * Time.deltaTime));
+            // 再钉一次，防止别的脚本或布局把准星挪走
+            _rt.anchoredPosition = Vector2.zero;
 
-            Color c = _hover ? hoverColor : idleColor;
+            Scan();
+
+            bool hover = _hover;
+            float want = hover ? hoverSize : idleSize;
+            if (hover && pulseAmount > 0f) want += Mathf.Sin(Time.time * 6f) * idleSize * pulseAmount;
+
+            _size = Mathf.Lerp(_size, want, 1f - Mathf.Exp(-followLerp * Time.deltaTime));
+
+            Color c = hover ? hoverColor : idleColor;
             if (_ring != null)
             {
                 _ring.rectTransform.sizeDelta = new Vector2(_size, _size);
                 _ring.color = c;
             }
 
-            bool showHand = _hover && _hand.sprite != null;
+            bool showHand = hover && _hand.sprite != null;
             if (_hand != null)
             {
                 _hand.enabled = showHand;
@@ -132,16 +171,97 @@ namespace Move1024
 
             if (_label != null)
             {
-                bool show = _hover && !string.IsNullOrEmpty(_hoverLabel);
+                bool show = hover && !string.IsNullOrEmpty(_labelText);
                 _label.enabled = show;
-                if (show) _label.text = _hoverLabel;
+                if (show) _label.text = _labelText;
             }
         }
 
-        public void SetHover(bool on, string label)
+        /// <summary>从屏幕中心发一条射线，判定当前瞄准的东西。</summary>
+        void Scan()
         {
-            _hover = on;
-            _hoverLabel = label;
+            HoveredInteractable = null;
+            HoveredCollider = null;
+            string hint = null;
+
+            Camera cam = Camera.main;
+            if (cam == null)
+            {
+                SetLook(false, "");
+                return;
+            }
+
+            Ray ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            RaycastHit hit;
+            bool got = castRadius > 0f
+                ? Physics.SphereCast(ray, castRadius, out hit, maxDistance, rayMask, QueryTriggerInteraction.Collide)
+                : Physics.Raycast(ray, out hit, maxDistance, rayMask, QueryTriggerInteraction.Collide);
+            if (got)
+            {
+                Collider col = hit.collider;
+
+                DeskFocusInteractable it = col.GetComponentInParent<DeskFocusInteractable>();
+                if (it != null)
+                {
+                    HoveredInteractable = it;
+                    hint = string.IsNullOrEmpty(it.hoverHint) ? "点击查看" : it.hoverHint;
+                    HoveredCollider = col;
+                }
+                else
+                {
+                    DustErase dust = col.GetComponentInParent<DustErase>();
+                    if (dust != null && dust.IsActive)
+                    {
+                        hint = dust.hoverHint;
+                        HoveredCollider = col;
+                    }
+                    else
+                    {
+                        TVInteraction tv = col.GetComponentInParent<TVInteraction>();
+                        if (tv != null)
+                        {
+                            hint = tv.hoverHint;
+                            HoveredCollider = col;
+                        }
+                        else if (HasInteractableTag(col))
+                        {
+                            hint = "点击查看";
+                            HoveredCollider = col;
+                        }
+                    }
+                }
+            }
+
+            if (_hasOverride && !string.IsNullOrEmpty(_overrideLabel))
+            {
+                SetLook(true, _overrideLabel);
+                return;
+            }
+
+            SetLook(HoveredCollider != null, hint ?? "");
+        }
+
+        bool HasInteractableTag(Collider col)
+        {
+            if (string.IsNullOrEmpty(interactableTag)) return false;
+            try { return col.CompareTag(interactableTag); }
+            catch (UnityException) { return false; }   // 项目里还没定义这个标签
+        }
+
+        void SetLook(bool hover, string text)
+        {
+            _hover = hover;
+            _labelText = text;
+        }
+
+        /// <summary>
+        /// 临时覆盖提示文字（比如桌面特写里显示"按住左键画圈"）。
+        /// 传 null 或空串即取消覆盖，回到自动判定的文字。
+        /// </summary>
+        public void SetOverrideLabel(string text)
+        {
+            _hasOverride = !string.IsNullOrEmpty(text);
+            _overrideLabel = text;
         }
 
         /// <summary>用代码画一枚圆环，省掉一张切图。</summary>

@@ -23,6 +23,8 @@ namespace Move1024
         AudioClip _tinnitus;
         AudioClip _tape;
         AudioClip _humming;
+        AudioClip _dust;
+        AudioClip _knock;
 
         AudioSource _humSource;
 
@@ -49,6 +51,8 @@ namespace Move1024
             _type = BuildType();
             _tinnitus = BuildTinnitus();
             _tape = BuildTapeRip();
+            _dust = BuildDust();
+            _knock = BuildKnock();
 
             _humSource = gameObject.AddComponent<AudioSource>();
             _humSource.playOnAwake = false;
@@ -100,6 +104,18 @@ namespace Move1024
         public void PlayTapeRip()
         {
             if (_sfx != null && _tape != null) _sfx.PlayOneShot(_tape, sfxVolume * 0.8f);
+        }
+
+        /// <summary>灰尘被擦干净后"消散"的一口气（模块 2）。</summary>
+        public void PlayDust()
+        {
+            if (_sfx != null && _dust != null) _sfx.PlayOneShot(_dust, sfxVolume * 0.7f);
+        }
+
+        /// <summary>拍老电视的"哐"（模块 3）。</summary>
+        public void PlayKnock()
+        {
+            if (_sfx != null && _knock != null) _sfx.PlayOneShot(_knock, sfxVolume * 0.6f);
         }
 
         public void AmbienceOn(float target = -1f)
@@ -280,6 +296,48 @@ namespace Move1024
             }
 
             return MakeClip("hum_tape", data);
+        }
+
+        /// <summary>灰尘消散：一层带通噪声，先"噗"一下再沙沙散开。0.8 秒。</summary>
+        static AudioClip BuildDust()
+        {
+            int n = (int)(Rate * 0.8f);
+            float[] data = new float[n];
+            System.Random rng = new System.Random(53);
+            float lp = 0f;
+            float hp = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float t = (float)i / Rate;
+                // 前 0.05s 冲起来，之后慢慢散掉
+                float env = Mathf.Clamp01(t / 0.05f) * Mathf.Exp(-t * 3.8f);
+                float noise = (float)(rng.NextDouble() * 2.0 - 1.0);
+
+                lp = Mathf.Lerp(lp, noise, 0.28f);          // 高频沙沙
+                hp = Mathf.Lerp(hp, lp, 0.02f);             // 低频"噗"
+                float breath = lp - hp;
+
+                data[i] = (breath * 1.6f + hp * 0.5f) * env * 0.55f;
+            }
+            return MakeClip("sfx_dust", data);
+        }
+
+        /// <summary>拍电视：低频撞击 + 一点塑料壳的空腔共振。0.18 秒。</summary>
+        static AudioClip BuildKnock()
+        {
+            int n = (int)(Rate * 0.18f);
+            float[] data = new float[n];
+            System.Random rng = new System.Random(67);
+            for (int i = 0; i < n; i++)
+            {
+                float t = (float)i / Rate;
+                float env = Mathf.Exp(-t * 38f);
+                float thud = Mathf.Sin(2f * Mathf.PI * 96f * t) * 0.75f
+                           + Mathf.Sin(2f * Mathf.PI * 168f * t) * 0.25f;
+                float tick = (float)(rng.NextDouble() * 2.0 - 1.0) * Mathf.Exp(-t * 120f);
+                data[i] = (thud + tick * 0.5f) * env * 0.8f;
+            }
+            return MakeClip("sfx_knock", data);
         }
 
         static AudioClip MakeClip(string name, float[] data)

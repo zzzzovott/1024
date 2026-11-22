@@ -23,9 +23,14 @@ namespace Move1024
         [Tooltip("淡出后等多久再交还操作")]
         public float settle = 0.3f;
 
+        [Header("启动方式")]
+        [Tooltip("勾上=进场景立刻播；关掉=等主菜单调用 Begin()（配 MainMenu 用）")]
+        public bool autoStart = true;
+
         public bool Enabled = true;
 
         bool _done;
+        bool _started;
 
         void Start()
         {
@@ -40,6 +45,27 @@ namespace Move1024
                 _done = true;
                 return;
             }
+
+            if (autoStart)
+            {
+                Begin();
+            }
+            else
+            {
+                // 主菜单会盖在上面；先把黑幕拉满，等 Begin() 再演，避免菜单淡出时露出游戏画面
+                if (black != null)
+                {
+                    black.alpha = 1f;
+                    black.blocksRaycasts = true;
+                }
+            }
+        }
+
+        /// <summary>开始播开场（主菜单点击后调用）。重复调用无效。</summary>
+        public void Begin()
+        {
+            if (_started || _done) return;
+            _started = true;
             StartCoroutine(Routine());
         }
 
