@@ -14,6 +14,7 @@ namespace Move1024
         public bool[] solved = new bool[0];
         public string[] digits = new string[0];
         public bool dustCleared;
+        public bool hasRag;
 
         public string savedAt = "";
         public int solvedCount;

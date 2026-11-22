@@ -54,6 +54,20 @@ namespace Move1024
         public Collider HoveredCollider { get; private set; }
         public bool IsHovering { get { return HoveredCollider != null; } }
 
+        /// <summary>当前场景里的准星（第一人称只有一个），给"全局提示"用。</summary>
+        public static CrosshairUI Active { get; private set; }
+
+        /// <summary>
+        /// 全局提示：没有悬停物体时也会显示（比如抱着箱子时的 [点击 放下箱子]）。
+        /// 每帧由对应系统覆盖写，不需要时传空串即可。
+        /// </summary>
+        public void SetGlobalPrompt(string text)
+        {
+            _globalPrompt = text;
+        }
+
+        string _globalPrompt;
+
         Image _ring;
         Image _halo;
         Image _dot;
@@ -68,6 +82,7 @@ namespace Move1024
 
         void Awake()
         {
+            Active = this;
             _rt = GetComponent<RectTransform>();
             if (_rt == null)
             {
@@ -162,6 +177,7 @@ namespace Move1024
 
         void OnDestroy()
         {
+            if (Active == this) Active = null;
             Cursor.visible = true;
         }
 
@@ -216,7 +232,7 @@ namespace Move1024
 
             if (_label != null)
             {
-                bool show = hover && !string.IsNullOrEmpty(_labelText);
+                bool show = !string.IsNullOrEmpty(_labelText);
                 _label.enabled = show;
                 if (show) _label.text = _labelText;
             }
@@ -258,7 +274,9 @@ namespace Move1024
                     DustErase dust = col.GetComponentInParent<DustErase>();
                     if (dust != null && dust.IsActive)
                     {
-                        hint = dust.IsInRange ? dust.hoverHint : dust.farHint;
+                        hint = !dust.HasRag
+                            ? "需要一块抹布"
+                            : (dust.IsInRange ? dust.hoverHint : dust.farHint);
                         HoveredCollider = col;
                     }
                     else
@@ -269,10 +287,19 @@ namespace Move1024
                             hint = tv.IsInRange ? tv.hoverHint : tv.farHint;
                             HoveredCollider = col;
                         }
-                        else if (HasInteractableTag(col))
+                        else
                         {
-                            hint = "点击查看";
-                            HoveredCollider = col;
+                            RagPickup rag = col.GetComponentInParent<RagPickup>();
+                            if (rag != null)
+                            {
+                                hint = rag.IsHeld ? rag.dropHint : rag.hoverHint;
+                                HoveredCollider = col;
+                            }
+                            else if (HasInteractableTag(col))
+                            {
+                                hint = "点击查看";
+                                HoveredCollider = col;
+                            }
                         }
                     }
                 }
@@ -281,6 +308,12 @@ namespace Move1024
             if (_hasOverride && !string.IsNullOrEmpty(_overrideLabel))
             {
                 SetLook(true, _overrideLabel);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(hint) && !string.IsNullOrEmpty(_globalPrompt))
+            {
+                SetLook(false, _globalPrompt);
                 return;
             }
 

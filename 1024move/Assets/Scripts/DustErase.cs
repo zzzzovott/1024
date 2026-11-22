@@ -36,6 +36,8 @@ namespace Move1024
         [Header("擦除条件")]
         [Tooltip("玩家（用它的位置算距离）。留空则不限制")]
         public Transform player;
+        [Tooltip("必须先拿到抹布才能擦灰（设计稿：不再凭空擦）")]
+        public RagPickup rag;
         [Tooltip("玩家要离多近才能擦（米）：设计稿要求走到桌前，这里给 2 米")]
         public float maxPlayerDistance = 2.0f;
         [Tooltip("射线的最远距离：站在桌前时 2-3 米足够")]
@@ -65,8 +67,12 @@ namespace Move1024
         /// <summary>擦到阈值时触发一次。</summary>
         public event Action Cleared;
 
+        /// <summary>没拿抹布就想擦时触发（用来播"太脏了，得先找块抹布擦擦"）。</summary>
+        public event Action NoRagAttempt;
+
         public bool IsActive { get { return !_cleared; } }
         public bool IsFading { get { return _fading; } }
+        public bool HasRag { get { return rag == null || rag.IsHeld; } }
         public bool IsInRange
         {
             get
@@ -188,6 +194,13 @@ namespace Move1024
         {
             if (_cleared) return;
 
+            // 没有抹布就擦不动，并给一次"得先找块抹布"的提示
+            if (!HasRag)
+            {
+                TryWarnNoRag();
+                return;
+            }
+
             bool holding = Input.GetMouseButton(0);
             if (!holding)
             {
@@ -211,8 +224,27 @@ namespace Move1024
             Erase(hit.textureCoord);
         }
 
-        void ShowBrush(Vector3 worldPoint, Vector3 normal)
+        float _nextNoRagWarn;
+
+        /// <summary>没拿抹布却对着桌面用力擦时，给一次提示（有冷却）。</summary>
+        void TryWarnNoRag()
         {
+            if (Time.time < _nextNoRagWarn) return;
+            if (!Input.GetMouseButton(0)) return;
+
+            Camera cam = Camera.main;
+            if (cam == null) return;
+
+            Ray ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            RaycastHit hit;
+            if (!Physics.Raycast(ray, out hit, maxRayDistance)) return;
+            if (hit.collider != _col) return;
+
+            _nextNoRagWarn = Time.time + 5f;
+            if (NoRagAttempt != null) NoRagAttempt();
+        }
+
+        void ShowBrush(Vector3 worldPoint, Vector3 normal)        {
             if (brushMarker == null) return;
             if (!brushMarker.activeSelf) brushMarker.SetActive(true);
 

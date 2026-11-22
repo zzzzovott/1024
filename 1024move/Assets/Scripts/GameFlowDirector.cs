@@ -54,6 +54,8 @@ namespace Move1024
         public KeyCode pickupKey = KeyCode.F;
         [Tooltip("桌面灰尘（存档要记它有没有擦干净）")]
         public DustErase dust;
+        [Tooltip("抹布（存档要记有没有拿到）")]
+        public RagPickup rag;
         [Tooltip("持握点：物件飞到它这里。通常是 Main Camera 下的空物体")]
         public Transform holdAnchor;
         [Tooltip("飞向镜头 / 飞回原位的时间（秒）")]
@@ -98,7 +100,10 @@ namespace Move1024
         Vector3 _originPos;
         Quaternion _originRot;
         bool _held;
+        bool _restoring;
         bool _endingPlayed;
+        int _clutterStored;
+        float _nextIdleHint;
 
         static GameFlowDirector _instance;
         public static GameFlowDirector Instance { get { return _instance; } }
@@ -117,6 +122,17 @@ namespace Move1024
             if (passwordLock != null) passwordLock.Unlocked += OnLockUnlocked;
             if (contractUI != null) contractUI.Revealed += OnContractRevealed;
 
+            // 引导：抹布拿起/放下、桌面擦干净，都播一句 OS
+            if (rag != null)
+            {
+                rag.PickedUp += OnRagPicked;
+                rag.Dropped += OnRagDropped;
+            }
+            if (dust != null) dust.Cleared += OnDustCleared;
+            if (dust != null) dust.NoRagAttempt += OnDustNoRag;
+
+            _nextIdleHint = Time.time + 15f;   // 发呆 15 秒给一次提示
+
             SetContractAvailable(false);
             SetState(State.Explore);
             ShowHints(true, false);
@@ -129,6 +145,13 @@ namespace Move1024
 
             if (passwordLock != null) passwordLock.Unlocked -= OnLockUnlocked;
             if (contractUI != null) contractUI.Revealed -= OnContractRevealed;
+            if (rag != null)
+            {
+                rag.PickedUp -= OnRagPicked;
+                rag.Dropped -= OnRagDropped;
+            }
+            if (dust != null) dust.Cleared -= OnDustCleared;
+            if (dust != null) dust.NoRagAttempt -= OnDustNoRag;
 
             if (_instance == this) _instance = null;
         }
@@ -136,6 +159,14 @@ namespace Move1024
         void Update()
         {
             UpdateHover();
+            UpdateGuidance();
+
+            // 发呆防卡关：15 秒没进展就提示一句，之后每 25 秒再提一次
+            if ((state == State.Explore || state == State.Walking) && Time.time >= _nextIdleHint)
+            {
+                _nextIdleHint = Time.time + 25f;
+                SayDialogue(DialogueKeys.IdlePhase3);
+            }
 
             if (Input.GetKeyDown(KeyCode.F1)) debugAngles = !debugAngles;
             if (debugAngles) DrawAngleDebug();
@@ -330,29 +361,19 @@ namespace Move1024
                 OnAllObjectsSolved();
         }
 
-        /// <summary>卡住 14 秒 / 26 秒后，把提示说得更直白一点。别让玩家以为自己按错了。</summary>
+        /// <summary>特写里卡住 15 秒，给一句更具体的提示。</summary>
         System.Collections.IEnumerator DeskHintEscalation(DeskFocusInteractable it)
         {
             float t = 0f;
-            while (t < 14f && state == State.Desk && it != null && !it.PuzzleSolvedFlag)
+            while (t < 15f && state == State.Desk && it != null && !it.PuzzleSolvedFlag)
             {
                 t += Time.deltaTime;
                 yield return null;
             }
             if (it == null || it.PuzzleSolvedFlag || state != State.Desk) yield break;
 
-            if (it.rewindPuzzle != null)
-            {
-                if (deskHintText != null) deskHintText.text = "按住左键，绕着磁带画圈，转满 3 圈就倒好了";
-                yield break;
-            }
-
-            if (deskHintText != null) deskHintText.text = "影子越亮，说明越接近。慢慢转，别停手。";
-
-            yield return new WaitForSeconds(12f);
-
-            if (it != null && !it.PuzzleSolvedFlag && state == State.Desk && deskHintText != null)
-                deskHintText.text = "就是左右拖。转到影子最亮的那一下，它会自己吸附。";
+            if (deskHintText != null)
+                deskHintText.text = DialogueConfig.Get(DialogueKeys.DeskStall, "不对……再顺时针转一点点试试。");
         }
 
         void OnPuzzleSolved(DeskFocusInteractable it)
@@ -393,6 +414,9 @@ namespace Move1024
             if (passwordLock != null && !string.IsNullOrEmpty(it.digit))
                 passwordLock.FillSlot(it.passwordSlot, it.digit);
 
+            // 对齐成功的那一下
+            if (it.anglePuzzle != null) SayDialogue(DialogueKeys.ShadowSolved);
+
             solvedCount++;
 
             ShowHints(false, false);
@@ -404,6 +428,62 @@ namespace Move1024
         public void CancelFocus()
         {
             EndPickup(false);
+        }
+
+        /// <summary>给玩家的分步引导（探索阶段常驻在屏幕下方）。</summary>
+        string GuidanceText()
+        {
+            if (rag != null && !rag.IsHeld) return "① 纸箱旁有块抹布：准星对准它，按 F 拾取";
+            if (dust != null && dust.IsActive) return "② 走到桌前，准星对准桌面，按住左键滑动擦灰（F 可放下抹布）";
+            if (interactables != null && solvedCount < interactables.Count)
+                return "③ 准星对准桌上的旧物，按 F 拾取并解谜";
+            return "④ 桌面那份退租合同可以擦了（按住左键滑动）";
+        }
+
+        void UpdateGuidance()
+        {
+            if (state != State.Explore && state != State.Walking) return;
+            if (exploreHintText == null) return;
+
+            string guide = GuidanceText();
+            if (exploreHintText.text != guide) exploreHintText.text = guide;
+        }
+
+        void OnRagPicked()
+        {
+            if (_restoring) return;
+            // 拿到抹布后，桌面提示切换成"[按住左键 擦除桌面]"
+        }
+
+        void OnRagDropped()
+        {
+            if (_restoring) return;
+        }
+
+        void OnDustCleared()
+        {
+            if (_restoring) return;
+            SayDialogue(DialogueKeys.DustClearedFrog);
+        }
+
+        void OnDustNoRag()
+        {
+            SayDialogue(DialogueKeys.DustNoRag);
+        }
+
+        /// <summary>按文案表 id 说一句（打字机）。</summary>
+        public void SayDialogue(string id)
+        {
+            if (monologue == null) return;
+            string text = DialogueConfig.Get(id, "");
+            if (!string.IsNullOrEmpty(text)) monologue.Say(text);
+        }
+
+        /// <summary>旧物放进纸箱（ClutterPickup 调用）。连续放两件会触发一句 OS。</summary>
+        public void OnClutterStored()
+        {
+            _clutterStored++;
+            if (_clutterStored == 2) SayDialogue(DialogueKeys.ClutterStored2);
         }
 
         void OnAllObjectsSolved()
@@ -551,6 +631,7 @@ namespace Move1024
 
             d.digits = passwordLock != null ? passwordLock.GetValues() : new string[0];
             d.dustCleared = dust == null || !dust.IsActive;
+            d.hasRag = rag == null || rag.IsHeld;
             d.solvedCount = solvedCount;
             return d;
         }
@@ -559,6 +640,8 @@ namespace Move1024
         public void ApplySave(SaveData d)
         {
             if (d == null) return;
+
+            _restoring = true;
 
             if (player != null && d.hasPlayer)
                 player.Teleport(new Vector3(d.px, d.py, d.pz), d.yaw, d.pitch);
@@ -581,7 +664,12 @@ namespace Move1024
             // 灰已经擦干净的话，读档后别再盖回去
             if (d.dustCleared && dust != null && dust.IsActive) dust.ForceClear();
 
+            // 读过档时手里应该有抹布，就补上
+            if (d.hasRag && rag != null && !rag.IsHeld) rag.PickUp();
+
             if (n > 0 && solvedCount >= n) SetContractAvailable(true);
+
+            _restoring = false;
 
             SetState(State.Explore);
             ShowHints(true, false);

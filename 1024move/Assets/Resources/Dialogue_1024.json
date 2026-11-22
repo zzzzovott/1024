@@ -1,0 +1,28 @@
+{
+  "entries": [
+    { "id": "intro_start_box", "text": "毕业五年，第 1024 次打包……" },
+    { "id": "box_heavy", "text": "箱子太重了，先找个空地放下吧。" },
+    { "id": "box_drop_prompt", "text": "[点击 放下箱子]" },
+    { "id": "box_dropped", "text": "这间屋子……也终于要清空了。" },
+
+    { "id": "clutter_pickup_prompt", "text": "[左键 拾取旧物]" },
+    { "id": "clutter_store_prompt", "text": "[左键 放进纸箱]" },
+    { "id": "clutter_stored_2", "text": "装过西装，也装过锅碗瓢盆。" },
+
+    { "id": "rag_pickup_prompt", "text": "[F 拾取抹布]" },
+    { "id": "dust_no_rag", "text": "太脏了，得先找块抹布擦擦。" },
+    { "id": "dust_wipe_prompt", "text": "[按住左键 擦除桌面]" },
+
+    { "id": "dust_cleared_frog", "text": "这是……小学买的铁皮青蛙？" },
+    { "id": "cloth_prompt", "text": "[左键 挪开旧衣服]" },
+    { "id": "cloth_moved", "text": "（金属碰撞声）这是什么？我什么时候有过这个？" },
+    { "id": "box_view_prompt", "text": "[点击 查看铁盒]" },
+    { "id": "lock_locked", "text": "四位数的密码锁……密码会和这些旧东西有关吗？" },
+    { "id": "idle_phase3", "text": "也许该看看桌上那只青蛙，或者其他的旧物。" },
+
+    { "id": "frog_hold", "text": "得找个亮一点的地方看看。" },
+    { "id": "shadow_hint", "text": "调整角度，让它的影子投在墙上……" },
+    { "id": "shadow_solved", "text": "咔哒，好像是墙上的那个图案。" },
+    { "id": "desk_stall", "text": "不对……再顺时针转一点点试试。" }
+  ]
+}

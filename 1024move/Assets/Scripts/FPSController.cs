@@ -68,6 +68,9 @@ namespace Move1024
         public bool IsFreeCursorHeld { get { return _freeCursor; } }
         public bool IsMoving { get { return _hasAutoTarget || _planarVelocity.sqrMagnitude > 0.04f; } }
 
+        /// <summary>水平移动速度（米/秒），给双手摆动之类的表现用。</summary>
+        public float PlanarSpeed { get { return _planarVelocity.magnitude; } }
+
         void Awake()
         {
             _cc = GetComponent<CharacterController>();

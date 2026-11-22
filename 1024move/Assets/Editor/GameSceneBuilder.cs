@@ -247,7 +247,12 @@ namespace Move1024.EditorTools
                 new Vector3(0f, 205f, 0f),
                 new Vector3(-0.68f, 0.754f, 2.52f), spotMat,
                 "楼下有人喊吃饭，声音穿过整个夏天。",
-                8, mask1, "这青蛙……还是小学时买的。", 0f, interactables);
+                8, mask1, DialogueConfig.Get(DialogueKeys.FrogHold, "得找个亮一点的地方看看。"), 0f, interactables);
+
+            // 桌子特写时的操作提示（文案表里那条"调整角度，让它的影子投在墙上……"）
+            DeskFocusInteractable frogIt = frog.GetComponent<DeskFocusInteractable>();
+            if (frogIt != null)
+                frogIt.deskHint = DialogueConfig.Get(DialogueKeys.ShadowHint, "调整角度，让它的影子投在墙上……");
 
             // 2. 复读机磁带
             GameObject tape = new GameObject("Prop2_Cassette");
@@ -370,7 +375,7 @@ namespace Move1024.EditorTools
 
             dust.audio = audioDirector;
             dust.brushMarker = dustBrush;
-            dust.hoverHint = "按住左键滑动，擦掉桌上的灰";
+            dust.hoverHint = DialogueConfig.Get(DialogueKeys.DustWipePrompt, "[按住左键 擦除桌面]");
             director.dust = dust;      // 存档要记灰尘状态
 
             // ---------- 老电视（模块 3） ----------
@@ -702,6 +707,78 @@ namespace Move1024.EditorTools
             RectTransform chRt = NewRect(canvas.transform, "Crosshair");
             CrosshairUI cross = chRt.gameObject.AddComponent<CrosshairUI>();
 
+            // --- 抹布：擦灰的前置道具，放在纸箱旁的地上 ---
+            Material ragMat = GetOrCreateMaterial("M_Rag", new Color(0.72f, 0.69f, 0.62f), 0.05f);
+            GameObject ragGo = new GameObject("Rag");
+            ragGo.transform.position = new Vector3(-1.95f, 0.015f, -1.05f);
+            ragGo.transform.rotation = Quaternion.Euler(0f, 24f, 0f);
+            MakeChild("Body", ragGo.transform, Vector3.zero, new Vector3(0.34f, 0.02f, 0.28f), ragMat);
+            GameObject ragFold = MakeChild("Fold", ragGo.transform, new Vector3(0.02f, 0.026f, 0f),
+                new Vector3(0.26f, 0.03f, 0.18f), ragMat);
+            ragFold.transform.localRotation = Quaternion.Euler(0f, 18f, 0f);
+
+            BoxCollider ragCol = ragGo.AddComponent<BoxCollider>();
+            ragCol.size = new Vector3(0.46f, 0.16f, 0.40f);
+            ragCol.center = new Vector3(0f, 0.05f, 0f);
+
+            RagPickup rag = ragGo.AddComponent<RagPickup>();
+            rag.crosshair = cross;
+            rag.player = director.player != null ? director.player.transform : null;
+            rag.holdAnchor = Camera.main != null ? Camera.main.transform : null;
+            rag.audio = audio;
+            rag.hoverHint = DialogueConfig.Get(DialogueKeys.RagPickupPrompt, "[F 拾取抹布]");
+            if (director.dust != null) director.dust.rag = rag;
+            director.rag = rag;
+
+            // ---------- 第一阶段：开局抱着的纸箱 ----------
+            Material cartonMat = GetOrCreateMaterial("M_Carton", new Color(0.58f, 0.47f, 0.33f), 0.05f);
+            GameObject carryGo = new GameObject("Box_Carry");
+            MakeBox("Body", carryGo.transform, Vector3.zero, new Vector3(0.52f, 0.42f, 0.46f), cartonMat);
+            CarryingBox carrying = carryGo.AddComponent<CarryingBox>();
+            carrying.director = director;
+            carrying.player = director.player;
+            carrying.holdAnchor = Camera.main != null ? Camera.main.transform : null;
+            carrying.audio = audio;
+
+            // ---------- 第二阶段：地上旧物 → 放进纸箱 ----------
+            Material clutterMat = GetOrCreateMaterial("M_Tape", new Color(0.22f, 0.22f, 0.24f), 0.35f);
+            GameObject cartonTarget = GameObject.Find("Carton_1");
+
+            CreateClutter("Clutter_A", new Vector3(-2.05f, 0.09f, -1.25f), clutterMat,
+                cross, director, audio, cartonTarget);
+            CreateClutter("Clutter_B", new Vector3(-2.48f, 0.08f, -1.62f), clutterMat,
+                cross, director, audio, cartonTarget);
+
+            // ---------- 第三阶段：铁盒被旧衣服盖住 ----------
+            GameObject lockBoxGo = GameObject.Find("LockBox");
+            if (lockBoxGo != null)
+            {
+                BoxCollider boxCol = lockBoxGo.GetComponent<BoxCollider>();
+                if (boxCol == null) boxCol = lockBoxGo.AddComponent<BoxCollider>();
+                boxCol.size = new Vector3(0.30f, 0.18f, 0.22f);
+                boxCol.center = new Vector3(0f, 0.04f, 0f);
+
+                PromptSource boxPrompt = lockBoxGo.AddComponent<PromptSource>();
+                IronBoxInteract iron = lockBoxGo.AddComponent<IronBoxInteract>();
+                iron.crosshair = cross;
+                iron.director = director;
+                iron.prompt = boxPrompt;
+                iron.enabled = false;        // 掀开衣服后才可用
+                boxPrompt.Clear();
+
+                Material clothMat = GetOrCreateMaterial("M_Paper", new Color(0.86f, 0.83f, 0.74f), 0.02f);
+                GameObject coverGo = MakeBox("CoverCloth", lockBoxGo.transform,
+                    new Vector3(0f, 0.072f, 0f), new Vector3(0.34f, 0.025f, 0.26f), clothMat);
+
+                PromptSource clothPrompt = coverGo.AddComponent<PromptSource>();
+                ClothCover cloth = coverGo.AddComponent<ClothCover>();
+                cloth.crosshair = cross;
+                cloth.director = director;
+                cloth.prompt = clothPrompt;
+                cloth.audio = audio;
+                cloth.ironBox = iron;
+            }
+
             // --- 音频频谱（倒带成功后跳出来） ---
             RectTransform specRoot = NewRect(canvas.transform, "Spectrum");
             Anchor(specRoot, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
@@ -749,6 +826,7 @@ namespace Move1024.EditorTools
             IntroSequence intro = introRt.gameObject.AddComponent<IntroSequence>();
             intro.black = introCg;
             intro.monologue = os;
+            intro.line = DialogueConfig.Get(DialogueKeys.IntroStartBox, "毕业五年，第 1024 次打包……");
             _pendingIntro = intro;
 
             // --- 主菜单（开始游戏 / 继续游戏 / 设置） ---
@@ -1088,7 +1166,7 @@ namespace Move1024.EditorTools
             subtitle.raycastTarget = false;
 
             // --- 提示 ---
-            exploreHintText = NewText(canvasGo.transform, "Hint_Explore", "走到桌前，点桌上的旧物", 26,
+            exploreHintText = NewText(canvasGo.transform, "Hint_Explore", "① 纸箱旁有块抹布：准星对准它，按 F 拾取", 26,
                 new Color(1f, 1f, 1f, 0.5f), font);
             Anchor(exploreHintText.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(0f, 190f), new Vector2(1200f, 60f));
@@ -1265,6 +1343,23 @@ namespace Move1024.EditorTools
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
             t.verticalOverflow = VerticalWrapMode.Overflow;
             return t;
+        }
+
+        /// <summary>地上的旧物：左键拾取、走到纸箱前放进箱子。</summary>
+        static void CreateClutter(string name, Vector3 position, Material mat,
+            CrosshairUI cross, GameFlowDirector director, AudioDirector audio, GameObject carton)
+        {
+            GameObject go = MakeBox(name, null, position, new Vector3(0.24f, 0.14f, 0.20f), mat);
+
+            PromptSource prompt = go.AddComponent<PromptSource>();
+            ClutterPickup clutter = go.AddComponent<ClutterPickup>();
+            clutter.crosshair = cross;
+            clutter.director = director;
+            clutter.player = director.player != null ? director.player.transform : null;
+            clutter.holdAnchor = Camera.main != null ? Camera.main.transform : null;
+            clutter.storeTarget = carton != null ? carton.transform : null;
+            clutter.prompt = prompt;
+            clutter.audio = audio;
         }
 
         /// <summary>半透明文字按钮（暂停菜单用）。</summary>

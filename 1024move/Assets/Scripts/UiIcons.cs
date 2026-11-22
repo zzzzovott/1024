@@ -5,12 +5,86 @@ namespace Move1024
     /// <summary>代码画的 UI 图标（房子 / 存档 / 齿轮 / 圆点），不依赖美术切图。</summary>
     public static class UiIcons
     {
-        static Sprite _house, _save, _gear, _dot;
+        static Sprite _house, _save, _gear, _dot, _hand, _cloth;
 
         public static Sprite House { get { if (_house == null) _house = MakeHouse(64); return _house; } }
         public static Sprite Save { get { if (_save == null) _save = MakeSave(64); return _save; } }
         public static Sprite Gear { get { if (_gear == null) _gear = MakeGear(64); return _gear; } }
         public static Sprite Dot { get { if (_dot == null) _dot = MakeCircle(64); return _dot; } }
+
+        /// <summary>第一人称的手（连指手套轮廓：掌 + 拇指 + 袖口）。</summary>
+        public static Sprite Hand { get { if (_hand == null) _hand = MakeHand(128); return _hand; } }
+
+        /// <summary>手里攥着的抹布（下缘做点起伏，像垂下来的布）。</summary>
+        public static Sprite Cloth { get { if (_cloth == null) _cloth = MakeCloth(128); return _cloth; } }
+
+        static bool RoundedRect(float u, float v, float halfW, float halfH, float r)
+        {
+            float dx = Mathf.Max(Mathf.Abs(u) - (halfW - r), 0f);
+            float dy = Mathf.Max(Mathf.Abs(v) - (halfH - r), 0f);
+            return dx * dx + dy * dy <= r * r;
+        }
+
+        static Sprite MakeHand(int size)
+        {
+            Texture2D tex = NewTex(size);
+            Color32[] px = new Color32[size * size];
+            float half = size * 0.5f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (x + 0.5f - half) / half;
+                    float v = (y + 0.5f - half) / half;
+
+                    bool palm = RoundedRect(u + 0.04f, v - 0.04f, 0.36f, 0.78f, 0.28f);
+
+                    float tx = u - 0.30f;
+                    float ty = v + 0.28f;
+                    bool thumb = tx * tx + ty * ty < 0.21f * 0.21f;
+
+                    bool cuff = Mathf.Abs(u + 0.04f) < 0.40f && v < -0.80f;
+
+                    px[y * size + x] = (palm || thumb || cuff) ? White : Clear;
+                }
+            }
+
+            return Finish(tex, px);
+        }
+
+        static Sprite MakeCloth(int size)
+        {
+            Texture2D tex = NewTex(size);
+            Color32[] px = new Color32[size * size];
+            float half = size * 0.5f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (x + 0.5f - half) / half;
+                    float v = (y + 0.5f - half) / half;
+
+                    float bottom = -0.62f + Mathf.Sin(u * 7f) * 0.12f;
+                    float top = 0.76f + Mathf.Sin(u * 5f + 1.3f) * 0.06f;
+
+                    bool body = u > -0.92f && u < 0.92f && v < top && v > bottom;
+
+                    // 布料上的褶子：几条淡纹（半透明），让它不那么像一块板
+                    byte a = 255;
+                    if (body)
+                    {
+                        float fold = Mathf.Sin(u * 12f + v * 3f);
+                        a = (byte)Mathf.Lerp(200f, 255f, (fold + 1f) * 0.5f);
+                    }
+
+                    px[y * size + x] = body ? new Color32(255, 255, 255, a) : Clear;
+                }
+            }
+
+            return Finish(tex, px);
+        }
 
         static Sprite MakeHouse(int size)
         {
