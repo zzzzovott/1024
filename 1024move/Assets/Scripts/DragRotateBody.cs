@@ -29,6 +29,10 @@ namespace Move1024
         [Tooltip("吸附时的插值时长")]
         public float snapDuration = 0.25f;
 
+        [Header("持握模式")]
+        [Tooltip("光标锁定时用：不需要指针悬停在物体上，按住左键拖动即可旋转（拾取到手里的物件用）")]
+        public bool dragWithoutPointer = false;
+
         [Header("状态")]
         public bool interactable = true;
 
@@ -67,6 +71,23 @@ namespace Move1024
                 _angularVelocity *= inertiaRetain;
             }
 
+            // 持握模式：光标锁定时 OnMouseDrag 拿不到指针，改为直接读鼠标位移
+            if (dragWithoutPointer)
+            {
+                if (Input.GetMouseButton(0) && !_snapping)
+                {
+                    _dragging = true;
+                    float mdx = Input.GetAxisRaw("Mouse X") * dragSensitivity;
+                    float mdy = Input.GetAxisRaw("Mouse Y") * dragSensitivity;
+                    if (Mathf.Abs(mdx) + Mathf.Abs(mdy) > 0.0001f) ApplyDragDelta(mdx, mdy);
+                }
+                else if (_dragging)
+                {
+                    _dragging = false;
+                    _angularVelocity *= inertiaRetain;
+                }
+            }
+
             if (_dragging || _snapping) return;
 
             if (_angularVelocity.sqrMagnitude > 0.0001f)
@@ -83,14 +104,19 @@ namespace Move1024
 
         void OnMouseDrag()
         {
-            if (!interactable || _snapping) return;
-
-            _dragging = true;
-            if (_cam == null) _cam = Camera.main;
-            if (_cam == null) return;
+            if (!interactable || _snapping || dragWithoutPointer) return;
 
             float dx = Input.GetAxisRaw("Mouse X") * dragSensitivity;
             float dy = Input.GetAxisRaw("Mouse Y") * dragSensitivity;
+            ApplyDragDelta(dx, dy);
+        }
+
+        /// <summary>把一次鼠标位移（已经乘过灵敏度）应用到旋转上。</summary>
+        void ApplyDragDelta(float dx, float dy)
+        {
+            _dragging = true;
+            if (_cam == null) _cam = Camera.main;
+            if (_cam == null) return;
 
             Quaternion delta;
             if (axisLock)

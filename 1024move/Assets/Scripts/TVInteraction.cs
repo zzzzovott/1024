@@ -51,12 +51,27 @@ namespace Move1024
         [Header("声音")]
         public AudioDirector audio;
 
+        [Header("距离")]
+        [Tooltip("玩家（用位置算距离）。留空则不限制")]
+        public Transform player;
+        [Tooltip("要离多近才能拍：设计稿要求走到电视前，这里给 2 米")]
+        public float maxPlayerDistance = 2.0f;
+
         [Header("提示")]
         public string hoverHint = "点击拍打";
+        public string farHint = "走近一点再拍";
 
         /// <summary>灯现在是不是亮着（外部可以用来做"趁亮光赶紧转"的提示）。</summary>
         public bool IsLightOn { get; private set; }
         public int ClickCount { get { return _clicks.Count; } }
+        public bool IsInRange
+        {
+            get
+            {
+                if (player == null) return true;
+                return Vector3.Distance(player.position, transform.position) <= maxPlayerDistance;
+            }
+        }
 
         /// <summary>当前窗口内的点击数变化（当前, 需要）。</summary>
         public event Action<int, int> ClickCounted;
@@ -92,6 +107,7 @@ namespace Move1024
         void Update()
         {
             if (!Input.GetMouseButtonDown(0)) return;
+            if (!IsInRange) return;
 
             Camera cam = Camera.main;
             if (cam == null) return;

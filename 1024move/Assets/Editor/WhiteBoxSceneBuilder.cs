@@ -107,8 +107,8 @@ namespace Move1024.EditorTools
             cc.height = 1.8f;
             cc.radius = 0.3f;
             cc.center = Vector3.zero;
-            Player25DController pc = playerGo.AddComponent<Player25DController>();
-            pc.cameraTransform = camGo.transform;
+            FPSController pc = playerGo.AddComponent<FPSController>();
+            pc.cameraPivot = camGo.transform;
 
             rig.playerFollow = playerGo.transform;
 

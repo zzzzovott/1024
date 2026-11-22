@@ -19,10 +19,14 @@ namespace Move1024
         [Header("外观")]
         [Tooltip("手形图标（郑子涵的切图）。留空时就只放大圆环")]
         public Sprite handSprite;
-        public Color idleColor = new Color(1f, 1f, 1f, 0.55f);
-        public Color hoverColor = new Color(1f, 0.95f, 0.86f, 0.95f);
-        public float idleSize = 10f;
-        public float hoverSize = 30f;
+        public Color idleColor = new Color(1f, 1f, 1f, 0.8f);
+        public Color hoverColor = new Color(1f, 0.95f, 0.86f, 1f);
+        [Tooltip("描边色：画在圆环外面一圈，浅色背景也能看清")]
+        public Color outlineColor = new Color(0f, 0f, 0f, 0.55f);
+        public float idleSize = 30f;
+        public float hoverSize = 62f;
+        [Tooltip("中心小点的直径比例（相对 idleSize）")]
+        [Range(0f, 0.6f)] public float dotRatio = 0.30f;
         [Tooltip("悬停时圆环的呼吸幅度（0 = 不呼吸）")]
         public float pulseAmount = 0.05f;
         public float followLerp = 18f;
@@ -51,6 +55,8 @@ namespace Move1024
         public bool IsHovering { get { return HoveredCollider != null; } }
 
         Image _ring;
+        Image _halo;
+        Image _dot;
         Image _hand;
         Text _label;
         RectTransform _rt;
@@ -76,7 +82,19 @@ namespace Move1024
             _rt.sizeDelta = Vector2.zero;
             _rt.localScale = Vector3.one;
 
-            // 圆环
+            // 描边环（黑色，压在白色圆环下面一圈，浅色背景也能看清）
+            GameObject haloGo = new GameObject("Halo", typeof(RectTransform));
+            haloGo.transform.SetParent(transform, false);
+            RectTransform haloRt = haloGo.GetComponent<RectTransform>();
+            haloRt.anchorMin = haloRt.anchorMax = new Vector2(0.5f, 0.5f);
+            haloRt.anchoredPosition = Vector2.zero;
+            haloRt.sizeDelta = new Vector2(idleSize * 1.35f, idleSize * 1.35f);
+            _halo = haloGo.AddComponent<Image>();
+            _halo.sprite = MakeRingSprite(0.50f, 1.00f, 0.10f);
+            _halo.color = outlineColor;
+            _halo.raycastTarget = false;
+
+            // 主圆环（白）
             GameObject ringGo = new GameObject("Ring", typeof(RectTransform));
             ringGo.transform.SetParent(transform, false);
             RectTransform ringRt = ringGo.GetComponent<RectTransform>();
@@ -84,10 +102,22 @@ namespace Move1024
             ringRt.anchoredPosition = Vector2.zero;
             ringRt.sizeDelta = new Vector2(idleSize, idleSize);
             _ring = ringGo.AddComponent<Image>();
-            _ring.sprite = MakeRingSprite();
+            _ring.sprite = MakeRingSprite(0.58f, 0.98f, 0.07f);
             _ring.color = idleColor;
             _ring.raycastTarget = false;
             _size = idleSize;
+
+            // 中心小点：远看是一个明确的"瞄准点"
+            GameObject dotGo = new GameObject("Dot", typeof(RectTransform));
+            dotGo.transform.SetParent(transform, false);
+            RectTransform dotRt = dotGo.GetComponent<RectTransform>();
+            dotRt.anchorMin = dotRt.anchorMax = new Vector2(0.5f, 0.5f);
+            dotRt.anchoredPosition = Vector2.zero;
+            dotRt.sizeDelta = new Vector2(idleSize * dotRatio, idleSize * dotRatio);
+            _dot = dotGo.AddComponent<Image>();
+            _dot.sprite = MakeCircleSprite();
+            _dot.color = idleColor;
+            _dot.raycastTarget = false;
 
             // 手形图标（没有素材就先空着，悬停时退化成"放大圆环"）
             GameObject handGo = new GameObject("Hand", typeof(RectTransform));
@@ -158,6 +188,21 @@ namespace Move1024
             }
 
             bool showHand = hover && _hand.sprite != null;
+
+            if (_halo != null)
+            {
+                _halo.rectTransform.sizeDelta = new Vector2(_size * 1.35f, _size * 1.35f);
+                _halo.color = hover ? new Color(0f, 0f, 0f, 0.7f) : outlineColor;
+                _halo.enabled = !showHand;
+            }
+
+            if (_dot != null)
+            {
+                float d = _size * dotRatio;
+                _dot.rectTransform.sizeDelta = new Vector2(d, d);
+                _dot.color = c;
+                _dot.enabled = !showHand;
+            }
             if (_hand != null)
             {
                 _hand.enabled = showHand;
@@ -204,7 +249,8 @@ namespace Move1024
                 if (it != null)
                 {
                     HoveredInteractable = it;
-                    hint = string.IsNullOrEmpty(it.hoverHint) ? "点击查看" : it.hoverHint;
+                    // 参考传统单机：按键提示写在准星下方
+                    hint = "[F] 拾取";
                     HoveredCollider = col;
                 }
                 else
@@ -212,7 +258,7 @@ namespace Move1024
                     DustErase dust = col.GetComponentInParent<DustErase>();
                     if (dust != null && dust.IsActive)
                     {
-                        hint = dust.hoverHint;
+                        hint = dust.IsInRange ? dust.hoverHint : dust.farHint;
                         HoveredCollider = col;
                     }
                     else
@@ -220,7 +266,7 @@ namespace Move1024
                         TVInteraction tv = col.GetComponentInParent<TVInteraction>();
                         if (tv != null)
                         {
-                            hint = tv.hoverHint;
+                            hint = tv.IsInRange ? tv.hoverHint : tv.farHint;
                             HoveredCollider = col;
                         }
                         else if (HasInteractableTag(col))
@@ -264,8 +310,34 @@ namespace Move1024
             _overrideLabel = text;
         }
 
-        /// <summary>用代码画一枚圆环，省掉一张切图。</summary>
-        static Sprite MakeRingSprite()
+        /// <summary>用代码画一枚圆环，省掉一张切图。inner/outer 是半径比例，soft 是边缘柔和度。</summary>
+        static Sprite MakeRingSprite(float inner, float outer, float soft)
+        {
+            const int size = 128;
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            Color32[] px = new Color32[size * size];
+            float half = size * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x + 0.5f - half) / half;
+                    float dy = (y + 0.5f - half) / half;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+
+                    float a = Mathf.Clamp01((outer - d) / soft) * Mathf.Clamp01((d - inner) / soft);
+                    px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply();
+
+            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+        }
+
+        /// <summary>中心小点用的实心圆。</summary>
+        static Sprite MakeCircleSprite()
         {
             const int size = 64;
             Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
@@ -279,8 +351,7 @@ namespace Move1024
                     float dx = (x + 0.5f - half) / half;
                     float dy = (y + 0.5f - half) / half;
                     float d = Mathf.Sqrt(dx * dx + dy * dy);
-
-                    float a = Mathf.Clamp01((0.96f - d) / 0.12f) * Mathf.Clamp01((d - 0.52f) / 0.12f);
+                    float a = Mathf.Clamp01((0.92f - d) / 0.18f);
                     px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
                 }
             }

@@ -12,8 +12,9 @@ namespace Move1024
     /// 用 Texture2D.SetPixels32 把笔刷范围内的 Alpha 抹成 0。
     /// 擦掉 clearThreshold（默认 80%）后：播"灰尘消散"音效、灰尘淡出、露出下面的旧物。
     ///
-    /// 注意：擦除用的是**鼠标位置**的射线，不是屏幕中心。屏幕中心准星负责"看/瞄"，
-    /// 擦灰本身是手势操作，必须跟着鼠标走才擦得动（固定机位下中心射线是钉死的一个点）。
+    /// 注意：第一人称下擦除用的是**屏幕中心（准星）**的射线：按住左键、转动视角，
+    /// 准星扫过哪里就擦到哪里。站在桌前（2 米内）才生效。
+    /// 想改回"鼠标位置擦"，把 aimFromCenter 关掉即可。
     /// </summary>
     [RequireComponent(typeof(MeshCollider))]
     public class DustErase : MonoBehaviour
@@ -33,15 +34,20 @@ namespace Move1024
         public float fadeDuration = 0.9f;
 
         [Header("擦除条件")]
-        [Tooltip("玩家要离多近才能擦（米），防止隔着房间遥控擦灰")]
-        public Player25DController player;
-        public float maxPlayerDistance = 2.8f;
-        [Tooltip("鼠标射线的最大距离")]
-        public float maxRayDistance = 9f;
+        [Tooltip("玩家（用它的位置算距离）。留空则不限制")]
+        public Transform player;
+        [Tooltip("玩家要离多近才能擦（米）：设计稿要求走到桌前，这里给 2 米")]
+        public float maxPlayerDistance = 2.0f;
+        [Tooltip("射线的最远距离：站在桌前时 2-3 米足够")]
+        public float maxRayDistance = 3.5f;
+        [Tooltip("用屏幕中心（准星）发射擦除射线；关掉则用鼠标位置")]
+        public bool aimFromCenter = true;
 
         [Header("擦完之后")]
         [Tooltip("灰尘下面要露出来的东西（会把它们的碰撞体打开，从而变成可点）")]
         public GameObject[] revealObjects;
+        [Tooltip("擦净前先把这些物体藏起来：灰尘贴着桌面时，旧物会戳出灰面")]
+        public bool hideRevealRenderers = true;
         [Tooltip("擦干净后才出现的半透明东西（桌面光斑等）。透明物体不吃深度，不关掉会透过灰尘显示出来")]
         public Renderer[] showAfterClear;
         public AudioDirector audio;
@@ -52,6 +58,7 @@ namespace Move1024
 
         [Header("提示")]
         public string hoverHint = "按住左键滑动，擦掉桌上的灰";
+        public string farHint = "走近一点再擦";
 
         /// <summary>0~1，已擦除的比例。</summary>
         public event Action<float> ProgressChanged;
@@ -60,6 +67,14 @@ namespace Move1024
 
         public bool IsActive { get { return !_cleared; } }
         public bool IsFading { get { return _fading; } }
+        public bool IsInRange
+        {
+            get
+            {
+                if (player == null) return true;
+                return Vector3.Distance(player.position, transform.position) <= maxPlayerDistance;
+            }
+        }
         public float Progress { get { return _total <= 0 ? 0f : (float)_erased / _total; } }
 
         Texture2D _tex;
@@ -89,10 +104,26 @@ namespace Move1024
 
             if (brushMarker != null) brushMarker.SetActive(false);
 
+            SetRevealVisible(false);
+
             if (showAfterClear != null)
             {
                 for (int i = 0; i < showAfterClear.Length; i++)
                     if (showAfterClear[i] != null) showAfterClear[i].enabled = false;
+            }
+        }
+
+        /// <summary>灰尘下面的旧物：擦净前藏起来，擦净后显示。</summary>
+        void SetRevealVisible(bool visible)
+        {
+            if (!hideRevealRenderers || revealObjects == null) return;
+            for (int i = 0; i < revealObjects.Length; i++)
+            {
+                GameObject go = revealObjects[i];
+                if (go == null) continue;
+                Renderer[] rends = go.GetComponentsInChildren<Renderer>(true);
+                for (int r = 0; r < rends.Length; r++)
+                    if (rends[r] != null) rends[r].enabled = visible;
             }
         }
 
@@ -164,27 +195,30 @@ namespace Move1024
                 return;
             }
 
-            if (player != null && Vector3.Distance(player.transform.position, transform.position) > maxPlayerDistance)
-                return;
+            if (!IsInRange) return;
 
             Camera cam = Camera.main;
             if (cam == null) return;
 
-            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+            Ray ray = aimFromCenter
+                ? cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f))
+                : cam.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
             if (!Physics.Raycast(ray, out hit, maxRayDistance)) return;
             if (hit.collider != _col) return;
 
-            ShowBrush(hit.point);
+            ShowBrush(hit.point, hit.normal);
             Erase(hit.textureCoord);
         }
 
-        void ShowBrush(Vector3 worldPoint)
+        void ShowBrush(Vector3 worldPoint, Vector3 normal)
         {
             if (brushMarker == null) return;
             if (!brushMarker.activeSelf) brushMarker.SetActive(true);
-            brushMarker.transform.position = worldPoint + transform.up * 0.004f;
-            brushMarker.transform.rotation = transform.rotation;
+
+            brushMarker.transform.position = worldPoint + normal * 0.004f;
+            // 光斑贴在被打到的那一面（灰尘现在是贴合网格的壳，有上下左右多个面）
+            brushMarker.transform.rotation = Quaternion.FromToRotation(Vector3.forward, -normal);
         }
 
         void Erase(Vector2 uv)
@@ -245,6 +279,8 @@ namespace Move1024
                 for (int i = 0; i < showAfterClear.Length; i++)
                     if (showAfterClear[i] != null) showAfterClear[i].enabled = true;
             }
+
+            SetRevealVisible(true);
 
             if (revealObjects != null)
             {

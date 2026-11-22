@@ -25,8 +25,8 @@ namespace Move1024
         }
 
         [Header("引用")]
-        public Player25DController player;
-        public CameraStateRig cameraRig;
+        public FPSController player;
+        public CameraStateRig cameraRig;   // 第一人称下不再使用（留字段避免旧引用报错）
         public PasswordLockUI passwordLock;
         public ContractScratchUI contractUI;
         public FinaleController finale;
@@ -43,7 +43,23 @@ namespace Move1024
         [Header("桌面交互")]
         [Tooltip("玩家离物件多近可以直接进入特写")]
         public float nearDistance = 2.2f;
-        public bool walkBeforeFocus = true;
+        [Tooltip("第一人称下关掉：玩家自己走到桌前，不再自动导航")]
+        public bool walkBeforeFocus = false;
+        [Tooltip("多远之内才能点开旧物（米）：第一人称下靠走位控制距离")]
+        public float interactDistance = 2.5f;
+        [Tooltip("进入/退出特写是否播记忆白光：第一人称下关掉，否则每次点物件都闪一下")]
+        public bool useFocusTransition = false;
+        [Header("拾取（F 键）")]
+        [Tooltip("拾取 / 放下的按键")]
+        public KeyCode pickupKey = KeyCode.F;
+        [Tooltip("桌面灰尘（存档要记它有没有擦干净）")]
+        public DustErase dust;
+        [Tooltip("持握点：物件飞到它这里。通常是 Main Camera 下的空物体")]
+        public Transform holdAnchor;
+        [Tooltip("飞向镜头 / 飞回原位的时间（秒）")]
+        public float pickupMoveTime = 0.32f;
+        [Tooltip("没有持握点时，物件停在镜头前多远")]
+        public float holdDistance = 0.55f;
         public float focusInDuration = 0.7f;
         public float focusOutDuration = 0.65f;
 
@@ -78,8 +94,10 @@ namespace Move1024
 
         DeskFocusInteractable _current;
         DeskFocusInteractable _hovered;
-        Vector3 _pendingWalkTarget;
-        bool _waitingArrive;
+        Transform _originParent;
+        Vector3 _originPos;
+        Quaternion _originRot;
+        bool _held;
         bool _endingPlayed;
 
         static GameFlowDirector _instance;
@@ -129,18 +147,37 @@ namespace Move1024
                 return;
             }
 
+            // 拾取 / 放下（参考传统单机）：F 键拾取，持握时再按 F 或右键放下
+            if (Input.GetKeyDown(pickupKey) || (state == State.Desk && Input.GetMouseButtonDown(1)))
+            {
+                if (state == State.Desk)
+                {
+                    EndPickup(false);
+                    return;
+                }
+
+                if (state == State.Explore || state == State.Walking)
+                {
+                    if (_hovered != null)
+                    {
+                        if (player != null &&
+                            Vector3.Distance(player.transform.position, _hovered.transform.position) > interactDistance)
+                        {
+                            if (monologue != null) monologue.Say("走近一点再拾取。");
+                            return;
+                        }
+
+                        BeginPickup(_hovered);
+                        return;
+                    }
+                }
+            }
+
             if (state != State.Explore && state != State.Walking) return;
             if (contractUI != null && contractUI.panel != null && contractUI.panel.alpha > 0.5f) return;
             if (!Input.GetMouseButtonDown(0)) return;
             if (UnityEngine.EventSystems.EventSystem.current != null &&
                 UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
-
-            // 点击判定跟着准星走：屏幕中心正对着谁，就交互谁（准星已经替我们做完射线了）
-            if (_hovered != null)
-            {
-                BeginFocus(_hovered);
-                return;
-            }
 
             if (contractHotspot != null && crosshair != null && crosshair.HoveredCollider != null &&
                 crosshair.HoveredCollider.transform.IsChildOf(contractHotspot.transform))
@@ -153,81 +190,144 @@ namespace Move1024
             if (contractUI != null) contractUI.Open();
         }
 
-        void BeginFocus(DeskFocusInteractable it)
+        /// <summary>按下 F：把物件平滑吸到镜头前，进入持握状态。</summary>
+        void BeginPickup(DeskFocusInteractable it)
         {
-            if (it == null || it.PuzzleSolvedFlag) return;
+            if (it == null || it.PuzzleSolvedFlag || _held) return;
 
             _current = it;
+            _held = true;
+            _originParent = it.transform.parent;
+            _originPos = it.transform.position;
+            _originRot = it.transform.rotation;
 
-            if (walkBeforeFocus && player != null &&
-                Vector3.Distance(player.transform.position, it.transform.position) > nearDistance)
-            {
-                Vector3 target = it.transform.position;
-                Vector3 dir = player.transform.position - it.transform.position;
-                dir.y = 0f;
-                if (dir.sqrMagnitude < 0.01f) dir = Vector3.back;
-                target += dir.normalized * 0.9f;
-
-                player.MoveTo(target);
-                _pendingWalkTarget = target;
-                _waitingArrive = true;
-                SetState(State.Walking);
-                return;
-            }
-
-            EnterDesk(it);
-        }
-
-        void LateUpdate()
-        {
-            if (state != State.Walking || !_waitingArrive) return;
-            if (player == null) { EnterDesk(_current); return; }
-
-            if (!player.IsMoving ||
-                Vector3.Distance(player.transform.position, _pendingWalkTarget) <= 0.35f)
-            {
-                _waitingArrive = false;
-                EnterDesk(_current);
-            }
-        }
-
-        void EnterDesk(DeskFocusInteractable it)
-        {
-            if (it == null) return;
             SetState(State.FocusIn);
 
             if (_hovered != null) { _hovered.SetHover(false); _hovered = null; }
 
-            if (player != null) player.SetInputEnabled(false);
+            // 持握时移动和视角都交给"拖拽旋转物件"，避免鼠标同时转镜头又转物件
+            if (player != null) { player.SetMoveEnabled(false); player.SetLookEnabled(false); }
+
             ShowHints(false, true);
             if (deskHintText != null)
                 deskHintText.text = it.rewindPuzzle != null
                     ? "按住左键，绕着磁带画圈"
-                    : "左右拖动，把影子转到最亮的地方";
-            if (ObjectFocused != null) ObjectFocused(it);
+                    : "按住左键拖动，把影子对齐";
+            if (crosshair != null) crosshair.SetOverrideLabel("[F] 放下");
 
-            // 记忆穿梭：白光盖住的那一刻再切镜头，玩家看不到推镜过程
-            if (transition != null)
-            {
-                transition.Play(() =>
-                {
-                    if (cameraRig != null) cameraRig.SnapDesk(it.transform.position);
-                    if (it.rotator != null) it.rotator.SetInteractable(true);
-                    if (it.rewindPuzzle != null) it.rewindPuzzle.SetInteractable(true);
-                });
-            }
-            else
-            {
-                if (cameraRig != null) cameraRig.GoDesk(it.transform.position);
-                if (it.rotator != null) it.rotator.SetInteractable(true);
-                if (it.rewindPuzzle != null) it.rewindPuzzle.SetInteractable(true);
-            }
+            if (ObjectFocused != null) ObjectFocused(it);
 
             if (monologue != null && !string.IsNullOrEmpty(it.osLine))
                 monologue.Say(it.osLine);
 
-            StartCoroutine(FocusInRoutine());
+            // 墙上的实时剪影会跟着物件跑偏，持握期间先关掉，只看桌面光斑/提示
+            if (it.projection != null && it.projection.liveQuad != null) it.projection.liveQuad.enabled = false;
+
+            StartCoroutine(PickupRoutine(it));
+        }
+
+        System.Collections.IEnumerator PickupRoutine(DeskFocusInteractable it)
+        {
+            Transform t = it.transform;
+            Vector3 fromPos = t.position;
+            Quaternion fromRot = t.rotation;
+
+            float time = 0f;
+            while (time < pickupMoveTime && it != null)
+            {
+                time += Time.deltaTime;
+                float u = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(time / pickupMoveTime));
+                t.position = Vector3.Lerp(fromPos, HoldTarget(), u);
+                t.rotation = Quaternion.Slerp(fromRot, HoldRotation(), u);
+                yield return null;
+            }
+
+            if (it == null) yield break;
+
+            // 挂到持握点下面，之后跟着镜头走（持握期间镜头是锁住的）
+            if (holdAnchor != null) t.SetParent(holdAnchor, true);
+            t.position = HoldTarget();
+            t.rotation = HoldRotation();
+
+            if (it.rotator != null)
+            {
+                it.rotator.dragWithoutPointer = true;   // 光标锁定：直接读鼠标位移
+                it.rotator.SetInteractable(true);
+            }
+            if (it.rewindPuzzle != null) it.rewindPuzzle.SetInteractable(true);
+
+            SetState(State.Desk);
             StartCoroutine(DeskHintEscalation(it));
+        }
+
+        Vector3 HoldTarget()
+        {
+            if (holdAnchor != null) return holdAnchor.position;
+            Camera cam = Camera.main;
+            if (cam == null) return _originPos;
+            return cam.transform.position + cam.transform.forward * holdDistance;
+        }
+
+        Quaternion HoldRotation()
+        {
+            if (holdAnchor != null) return holdAnchor.rotation;
+            Camera cam = Camera.main;
+            return cam != null ? cam.transform.rotation : _originRot;
+        }
+
+        /// <summary>放下物件（再按 F / 右键 / 解谜完成）。</summary>
+        public void EndPickup(bool solved)
+        {
+            if (!_held || _current == null) return;
+            StartCoroutine(ReturnRoutine(_current, solved));
+        }
+
+        System.Collections.IEnumerator ReturnRoutine(DeskFocusInteractable it, bool solved)
+        {
+            SetState(State.FocusOut);
+
+            if (it.rotator != null)
+            {
+                it.rotator.dragWithoutPointer = false;
+                it.rotator.SetInteractable(false);
+            }
+            if (it.rewindPuzzle != null) it.rewindPuzzle.SetInteractable(false);
+
+            // 先回到原来的父节点，再飞回原位
+            if (_originParent != null) it.transform.SetParent(_originParent, true);
+
+            Vector3 fromPos = it.transform.position;
+            Quaternion fromRot = it.transform.rotation;
+
+            float time = 0f;
+            while (time < pickupMoveTime && it != null)
+            {
+                time += Time.deltaTime;
+                float u = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(time / pickupMoveTime));
+                it.transform.position = Vector3.Lerp(fromPos, _originPos, u);
+                it.transform.rotation = Quaternion.Slerp(fromRot, _originRot, u);
+                yield return null;
+            }
+
+            if (it != null)
+            {
+                it.transform.position = _originPos;
+                it.transform.rotation = _originRot;
+
+                if (it.projection != null && it.projection.liveQuad != null)
+                    it.projection.liveQuad.enabled = true;
+            }
+
+            _held = false;
+            _current = null;
+            _hovered = null;
+
+            if (player != null) { player.SetMoveEnabled(true); player.SetLookEnabled(true); }
+            ShowHints(true, false);
+            SetState(State.Explore);
+
+            if (solved && solvedCount >= interactables.Count && interactables.Count > 0)
+                OnAllObjectsSolved();
         }
 
         /// <summary>卡住 14 秒 / 26 秒后，把提示说得更直白一点。别让玩家以为自己按错了。</summary>
@@ -253,12 +353,6 @@ namespace Move1024
 
             if (it != null && !it.PuzzleSolvedFlag && state == State.Desk && deskHintText != null)
                 deskHintText.text = "就是左右拖。转到影子最亮的那一下，它会自己吸附。";
-        }
-
-        System.Collections.IEnumerator FocusInRoutine()
-        {
-            yield return new WaitForSeconds(focusInDuration);
-            if (state == State.FocusIn) SetState(State.Desk);
         }
 
         void OnPuzzleSolved(DeskFocusInteractable it)
@@ -301,31 +395,15 @@ namespace Move1024
 
             solvedCount++;
 
-            SetState(State.FocusOut);
             ShowHints(false, false);
+            // 解开了：把物件放回原位，再恢复操作
+            yield return StartCoroutine(ReturnRoutine(it, true));
+        }
 
-            if (transition != null)
-            {
-                transition.Play(() =>
-                {
-                    if (cameraRig != null) cameraRig.SnapRoom();
-                });
-                yield return new WaitForSeconds(transition.whiteIn + transition.hold + transition.whiteOut + 0.15f);
-            }
-            else
-            {
-                if (cameraRig != null) cameraRig.GoRoom();
-                yield return new WaitForSeconds(focusOutDuration);
-            }
-
-            if (player != null) player.SetInputEnabled(true);
-            _current = null;
-            ShowHints(true, false);
-
-            if (solvedCount >= interactables.Count && interactables.Count > 0)
-                OnAllObjectsSolved();
-            else
-                SetState(State.Explore);
+        /// <summary>放下手上的物件，把操作还给玩家。</summary>
+        public void CancelFocus()
+        {
+            EndPickup(false);
         }
 
         void OnAllObjectsSolved()
@@ -414,9 +492,14 @@ namespace Move1024
             if (crosshair != null)
             {
                 if (state == State.Desk && _current != null)
-                    crosshair.SetOverrideLabel(string.IsNullOrEmpty(_current.deskHint) ? "按住左键拖动" : _current.deskHint);
+                {
+                    string op = string.IsNullOrEmpty(_current.deskHint) ? "按住左键拖动" : _current.deskHint;
+                    crosshair.SetOverrideLabel("[F] 放下   ·   " + op);
+                }
                 else
+                {
                     crosshair.SetOverrideLabel(null);
+                }
             }
         }
 
@@ -443,6 +526,65 @@ namespace Move1024
         {
             if (exploreHintGroup != null) exploreHintGroup.alpha = explore ? 1f : 0f;
             if (deskHintGroup != null) deskHintGroup.alpha = desk ? 1f : 0f;
+        }
+
+        // ---------------- 存档 / 读档 ----------------
+
+        /// <summary>记录当前进度：玩家位置朝向 + 三件旧物是否解开 + 密码槽数字。</summary>
+        public SaveData CaptureSave()
+        {
+            var d = new SaveData();
+
+            if (player != null)
+            {
+                Vector3 p = player.transform.position;
+                d.hasPlayer = true;
+                d.px = p.x; d.py = p.y; d.pz = p.z;
+                d.yaw = player.Yaw;
+                d.pitch = player.Pitch;
+            }
+
+            int n = interactables != null ? interactables.Count : 0;
+            d.solved = new bool[n];
+            for (int i = 0; i < n; i++)
+                d.solved[i] = interactables[i] != null && interactables[i].PuzzleSolvedFlag;
+
+            d.digits = passwordLock != null ? passwordLock.GetValues() : new string[0];
+            d.dustCleared = dust == null || !dust.IsActive;
+            d.solvedCount = solvedCount;
+            return d;
+        }
+
+        /// <summary>恢复进度：位置、已解开的旧物、密码槽。不重播记忆片段、不触发结局。</summary>
+        public void ApplySave(SaveData d)
+        {
+            if (d == null) return;
+
+            if (player != null && d.hasPlayer)
+                player.Teleport(new Vector3(d.px, d.py, d.pz), d.yaw, d.pitch);
+
+            solvedCount = 0;
+            int n = interactables != null ? interactables.Count : 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (interactables[i] == null) continue;
+                bool solved = d.solved != null && i < d.solved.Length && d.solved[i];
+                if (solved)
+                {
+                    interactables[i].RestoreSolved();
+                    solvedCount++;
+                }
+            }
+
+            if (passwordLock != null) passwordLock.RestoreSlots(d.digits);
+
+            // 灰已经擦干净的话，读档后别再盖回去
+            if (d.dustCleared && dust != null && dust.IsActive) dust.ForceClear();
+
+            if (n > 0 && solvedCount >= n) SetContractAvailable(true);
+
+            SetState(State.Explore);
+            ShowHints(true, false);
         }
 
         // ---------------- 给自动化冒烟测试用 ----------------

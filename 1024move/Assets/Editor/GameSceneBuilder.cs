@@ -176,11 +176,40 @@ namespace Move1024.EditorTools
             spot.color = new Color(1f, 0.93f, 0.82f);
             spot.shadows = LightShadows.Soft;
 
-            // ---------- 相机 ----------
+            // ---------- 玩家（第一人称） ----------
+            // 层级：Player(root, CharacterController) → Body(胶囊网格) + Main Camera(子物体)
+            // 相机是玩家的子物体，人走到哪镜头就跟到哪。
+            GameObject playerGo = new GameObject("Player");
+            playerGo.transform.position = new Vector3(-1.15f, 0.02f, 0.55f);
+            playerGo.transform.rotation = Quaternion.identity;
+
+            CharacterController cc = playerGo.AddComponent<CharacterController>();
+            cc.height = 1.7f;
+            cc.radius = 0.3f;
+            cc.center = new Vector3(0f, 0.85f, 0f);
+            cc.slopeLimit = 45f;
+            cc.stepOffset = 0.35f;
+            cc.skinWidth = 0.03f;
+
+            GameObject bodyGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            bodyGo.name = "Body";
+            Object.DestroyImmediate(bodyGo.GetComponent<CapsuleCollider>());
+            bodyGo.transform.SetParent(playerGo.transform, false);
+            bodyGo.transform.localPosition = new Vector3(0f, 0.85f, 0f);
+            bodyGo.transform.localScale = new Vector3(0.55f, 0.85f, 0.55f);
+            Renderer pr = bodyGo.GetComponent<Renderer>();
+            pr.sharedMaterial = GetOrCreateMaterial("M_Player", new Color(0.26f, 0.27f, 0.30f), 0.1f);
+            pr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+            // ---------- 相机（挂在玩家身上，第一人称） ----------
             GameObject camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
+            camGo.transform.SetParent(playerGo.transform, false);
+            camGo.transform.localPosition = new Vector3(0f, 1.56f, 0f);
+            camGo.transform.localRotation = Quaternion.identity;
+
             Camera cam = camGo.AddComponent<Camera>();
-            cam.fieldOfView = 42f;
+            cam.fieldOfView = 68f;                  // 第一人称给宽一点的视野
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(0.05f, 0.05f, 0.06f);
             cam.nearClipPlane = 0.05f;
@@ -189,38 +218,17 @@ namespace Move1024.EditorTools
             // 剪影替身只给剪影相机看，主相机要排除这三个层
             cam.cullingMask = ~((1 << 8) | (1 << 9) | (1 << 10));
 
-            CameraStateRig rig = camGo.AddComponent<CameraStateRig>();
-            rig.roomFov = 42f;
-            rig.deskFov = 32f;
-            rig.smoothTime = 0.55f;
+            FPSController fps = playerGo.AddComponent<FPSController>();
+            fps.cameraPivot = camGo.transform;
+            fps.walkSpeed = 3.2f;
+            fps.sprintSpeed = 5.4f;
+            fps.mouseSensitivity = 2.2f;
 
-            GameObject roomAnchor = new GameObject("Anchor_Room");
-            roomAnchor.transform.position = new Vector3(2.6f, 2.7f, -4.2f);
-            roomAnchor.transform.rotation = Quaternion.Euler(14.4f, -23.1f, 0f);
-
-            GameObject deskAnchor = new GameObject("Anchor_Desk");
-            deskAnchor.transform.position = new Vector3(0f, 1.28f, 0.55f);
-            deskAnchor.transform.rotation = Quaternion.Euler(17f, 0f, 0f);
-
-            rig.roomAnchor = roomAnchor.transform;
-            rig.deskAnchor = deskAnchor.transform;
-
-            // ---------- 玩家 ----------
-            GameObject playerGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            playerGo.name = "Player";
-            playerGo.transform.position = new Vector3(-1.15f, 0.55f, 0.55f);
-            playerGo.transform.localScale = new Vector3(0.55f, 0.55f, 0.55f);
-            Object.DestroyImmediate(playerGo.GetComponent<CapsuleCollider>());
-            Renderer pr = playerGo.GetComponent<Renderer>();
-            pr.sharedMaterial = GetOrCreateMaterial("M_Player", new Color(0.26f, 0.27f, 0.30f), 0.1f);
-            pr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            CharacterController cc = playerGo.AddComponent<CharacterController>();
-            cc.height = 1.1f;
-            cc.radius = 0.22f;
-            cc.center = Vector3.zero;
-            Player25DController pc = playerGo.AddComponent<Player25DController>();
-            pc.cameraTransform = camGo.transform;
-            rig.playerFollow = playerGo.transform;
+            // 拾取持握点：物件飞到这里（相机正前方稍低一点，不挡视线中心）
+            GameObject holdGo = new GameObject("HoldAnchor");
+            holdGo.transform.SetParent(camGo.transform, false);
+            holdGo.transform.localPosition = new Vector3(0f, -0.12f, 0.55f);
+            holdGo.transform.localRotation = Quaternion.identity;
 
             // ---------- 三件旧物 ----------
             GameObject props = new GameObject("Props");
@@ -289,11 +297,16 @@ namespace Move1024.EditorTools
             // ---------- 流程 ----------
             GameObject flowGo = new GameObject("GameFlow");
             GameFlowDirector director = flowGo.AddComponent<GameFlowDirector>();
-            director.player = pc;
-            director.cameraRig = rig;
+            director.player = fps;
+            // 第一人称：没有固定机位，CameraStateRig 不再挂载（cameraRig 留空，流程脚本里都有 null 判断）
             director.interactables = interactables;
             director.contractHotspot = contract;
             director.lockBox = box;
+            director.holdAnchor = holdGo.transform;
+            // 第一人称：玩家自己走到桌前，拾取不再自动导航、也不闪白光
+            director.interactDistance = 2.5f;
+            director.walkBeforeFocus = false;
+            director.useFocusTransition = false;
 
             GameObject moodGo = new GameObject("MoodLighting");
             MoodLightingController mood = moodGo.AddComponent<MoodLightingController>();
@@ -321,13 +334,10 @@ namespace Move1024.EditorTools
             }
 
             Material dustMat = GetDustMaterial("M_Dust", GetDustTexture("dust_mask"));
-            GameObject dustQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            dustQuad.name = "DeskDust";
-            dustQuad.transform.position = new Vector3(0f, 0.878f, 2.2f);
-            dustQuad.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            dustQuad.transform.localScale = new Vector3(2.28f, 1.02f, 1f);
+            // 灰尘层：直接复制桌面自己的网格，沿法线外扩 1.5mm —— 完全贴合桌面几何，
+            // 不再是一块飘在桌上的 Quad。
+            GameObject dustQuad = BuildDustShell(desk, "DeskDust", 0.0015f, dustMat);
             Renderer dustRend = dustQuad.GetComponent<Renderer>();
-            dustRend.sharedMaterial = dustMat;
             dustRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             dustRend.receiveShadows = false;
 
@@ -346,9 +356,10 @@ namespace Move1024.EditorTools
             dust.brushRadius = 30f;
             dust.textureSize = 256;
             dust.fadeDuration = 0.9f;
-            dust.player = pc;
-            dust.maxPlayerDistance = 2.8f;
-            dust.maxRayDistance = 9f;
+            dust.player = playerGo.transform;
+            dust.maxPlayerDistance = 2.0f;      // 第一人称：走到桌前 2 米内才能擦
+            dust.maxRayDistance = 3.5f;
+            dust.aimFromCenter = true;          // 用准星（屏幕中心）擦，移动视角即涂抹
             dust.revealObjects = new[] { frog, tape, ticket };
 
             // 桌面光斑是半透明（ZWrite Off），不关掉会"透"过同样半透明的灰尘显示出来
@@ -360,6 +371,7 @@ namespace Move1024.EditorTools
             dust.audio = audioDirector;
             dust.brushMarker = dustBrush;
             dust.hoverHint = "按住左键滑动，擦掉桌上的灰";
+            director.dust = dust;      // 存档要记灰尘状态
 
             // ---------- 老电视（模块 3） ----------
             GameObject tvRoot = new GameObject("Prop4_TV");
@@ -400,6 +412,8 @@ namespace Move1024.EditorTools
             tvSpot.shadows = LightShadows.Soft;
 
             TVInteraction tv = tvRoot.AddComponent<TVInteraction>();
+            tv.player = playerGo.transform;      // 距离判定用
+            tv.maxPlayerDistance = 2.0f;
             tv.spotLight = tvSpot;
             tv.screenRenderer = tvScreenRend;
             tv.audio = audioDirector;
@@ -428,7 +442,7 @@ namespace Move1024.EditorTools
 
             // ---------- 全局基础系统（V3.0 设计稿） ----------
             BuildGlobalSystems(canvas, uiFont, director, audioDirector);
-            if (_pendingIntro != null) _pendingIntro.player = pc;
+            if (_pendingIntro != null) _pendingIntro.player = fps;
 
             finale.mood = mood;
             finale.fade = fade;
@@ -737,7 +751,7 @@ namespace Move1024.EditorTools
             intro.monologue = os;
             _pendingIntro = intro;
 
-            // --- 主菜单（V3.0 序章第 1 步：点击【开始游戏】） ---
+            // --- 主菜单（开始游戏 / 继续游戏 / 设置） ---
             RectTransform menuRt = NewRect(canvas.transform, "MainMenu");
             StretchFull(menuRt);
             Image menuBg = menuRt.gameObject.AddComponent<Image>();
@@ -749,53 +763,266 @@ namespace Move1024.EditorTools
             Text menuTitle = NewText(menuRt, "Title", "第 1024 次 搬 家", 72,
                 new Color(0.95f, 0.93f, 0.88f, 1f), font);
             Anchor(menuTitle.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, 150f), new Vector2(1400f, 120f));
+                new Vector2(0f, 200f), new Vector2(1400f, 120f));
             menuTitle.raycastTarget = false;
 
             Text menuSub = NewText(menuRt, "Subtitle", "一 个 关 于 搬 家 的 记 忆", 30,
                 new Color(1f, 1f, 1f, 0.42f), font);
             Anchor(menuSub.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, 62f), new Vector2(1400f, 60f));
+                new Vector2(0f, 110f), new Vector2(1400f, 60f));
             menuSub.raycastTarget = false;
 
-            RectTransform startRt = NewRect(menuRt, "StartButton");
-            Anchor(startRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, -70f), new Vector2(360f, 88f));
-            Image startImg = startRt.gameObject.AddComponent<Image>();
-            startImg.color = new Color(1f, 1f, 1f, 0.14f);
-            Button startBtn = startRt.gameObject.AddComponent<Button>();
-            startBtn.targetGraphic = startImg;
-            ColorBlock sbc = startBtn.colors;
-            sbc.normalColor = new Color(1f, 1f, 1f, 0.14f);
-            sbc.highlightedColor = new Color(1f, 1f, 1f, 0.28f);
-            sbc.pressedColor = new Color(1f, 1f, 1f, 0.38f);
-            sbc.selectedColor = new Color(1f, 1f, 1f, 0.14f);
-            startBtn.colors = sbc;
+            Text startLabel, continueLabel;
+            Button startBtn = MakeButton(menuRt, "StartButton", "开 始 游 戏",
+                new Vector2(0f, 0f), new Vector2(380f, 80f), font, out startLabel);
+            Button continueBtn = MakeButton(menuRt, "ContinueButton", "继 续 游 戏",
+                new Vector2(0f, -100f), new Vector2(380f, 80f), font, out continueLabel);
 
-            Text startLabel = NewText(startRt, "Label", "开 始 游 戏", 34, new Color(1f, 1f, 1f, 0.9f), font);
-            StretchFull(startLabel.rectTransform);
-            startLabel.raycastTarget = false;
+            Text menuSaveInfo = NewText(menuRt, "SaveInfo", "", 22, new Color(1f, 1f, 1f, 0.4f), font);
+            Anchor(menuSaveInfo.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -178f), new Vector2(900f, 40f));
+            menuSaveInfo.raycastTarget = false;
 
             Text menuHint = NewText(menuRt, "Hint", "戴上耳机，点击开始", 24, new Color(1f, 1f, 1f, 0.3f), font);
             Anchor(menuHint.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, -210f), new Vector2(1000f, 50f));
+                new Vector2(0f, -260f), new Vector2(1000f, 50f));
             menuHint.raycastTarget = false;
+
+            // 主界面右上角的设置齿轮
+            RectTransform menuGearRt = NewRect(menuRt, "SettingsButton");
+            Anchor(menuGearRt, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-56f, -56f), new Vector2(64f, 64f));
+            Image menuGearBg = menuGearRt.gameObject.AddComponent<Image>();
+            menuGearBg.color = new Color(1f, 1f, 1f, 0.10f);
+            Button menuGear = menuGearRt.gameObject.AddComponent<Button>();
+            menuGear.targetGraphic = menuGearBg;
+            RectTransform menuGearIconRt = NewRect(menuGearRt, "Icon");
+            StretchFull(menuGearIconRt);
+            menuGearIconRt.offsetMin = new Vector2(15f, 15f);
+            menuGearIconRt.offsetMax = new Vector2(-15f, -15f);
+            Image menuGearIcon = menuGearIconRt.gameObject.AddComponent<Image>();
+            menuGearIcon.sprite = UiIcons.Gear;
+            menuGearIcon.color = new Color(1f, 1f, 1f, 0.85f);
+            menuGearIcon.raycastTarget = false;
 
             MainMenu menu = menuRt.gameObject.AddComponent<MainMenu>();
             menu.panel = menuCg;
             menu.startButton = startBtn;
+            menu.continueButton = continueBtn;
+            menu.continueLabel = continueLabel;
+            menu.saveInfoText = menuSaveInfo;
             menu.titleText = menuTitle;
             menu.subtitleText = menuSub;
             menu.hintText = menuHint;
             menu.intro = intro;
             menu.player = director.player;
             menu.crosshair = cross;
+            menu.flow = director;
+            menu.settingsButton = menuGear;
 
             // 开场改由主菜单触发（原来是一进场景就播）
             intro.autoStart = false;
 
-            // 准星要盖在开场黑幕之上
-            chRt.SetAsLastSibling();
+            // --- 暂停 / 系统菜单（Esc 呼出）：毛玻璃背景 + 四个按钮 ---
+            RectTransform pauseRt = NewRect(canvas.transform, "PauseMenu");
+            StretchFull(pauseRt);
+            Image pauseBg = pauseRt.gameObject.AddComponent<Image>();
+            pauseBg.color = new Color(0.02f, 0.02f, 0.035f, 0.80f);
+            pauseBg.raycastTarget = true;
+
+            // 全屏模糊：GrabPass 抓当前画面做多抽样模糊，再叠半透明深色
+            Material blurMat = GetBlurMaterial("M_UIBlur");
+            if (blurMat != null) pauseBg.material = blurMat;
+
+            CanvasGroup pauseCg = pauseRt.gameObject.AddComponent<CanvasGroup>();
+            pauseCg.alpha = 0f;
+            pauseCg.blocksRaycasts = false;
+
+            Text pauseTitle = NewText(pauseRt, "Title", "暂 停", 56, new Color(0.95f, 0.93f, 0.88f, 1f), font);
+            Anchor(pauseTitle.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 250f), new Vector2(1000f, 90f));
+            pauseTitle.raycastTarget = false;
+
+            Text resumeLabel, saveLabel, homeLabel, quitLabel;
+            Button resumeBtn = MakeButton(pauseRt, "ResumeButton", "继 续 游 戏",
+                new Vector2(0f, 110f), new Vector2(360f, 72f), font, out resumeLabel);
+            Button saveBtn = MakeButton(pauseRt, "SaveButton", "保 存 游 戏",
+                new Vector2(0f, 20f), new Vector2(360f, 72f), font, out saveLabel);
+            Button homeBtn = MakeButton(pauseRt, "HomeButton", "返 回 主 界 面",
+                new Vector2(0f, -70f), new Vector2(360f, 72f), font, out homeLabel);
+            Button quitBtn = MakeButton(pauseRt, "QuitButton", "退 出 游 戏",
+                new Vector2(0f, -160f), new Vector2(360f, 72f), font, out quitLabel);
+
+            // 文字右边挪一点，给左边的小房子图标让位
+            homeLabel.rectTransform.offsetMin = new Vector2(56f, 0f);
+
+            RectTransform homeIconRt = NewRect(homeBtn.transform, "HouseIcon");
+            Anchor(homeIconRt, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(44f, 0f), new Vector2(40f, 40f));
+            Image homeIcon = homeIconRt.gameObject.AddComponent<Image>();
+            homeIcon.raycastTarget = false;
+            homeIcon.color = new Color(1f, 0.96f, 0.88f, 0.95f);
+
+            Text toastText = NewText(pauseRt, "Toast", "", 26, new Color(0.85f, 0.95f, 0.85f, 0.95f), font);
+            Anchor(toastText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -240f), new Vector2(600f, 50f));
+            toastText.raycastTarget = false;
+
+            Text pauseHintText = NewText(pauseRt, "Hint", "按住 Ctrl 可以呼出鼠标来点按钮", 22,
+                new Color(1f, 1f, 1f, 0.35f), font);
+            Anchor(pauseHintText.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 90f), new Vector2(1200f, 40f));
+            pauseHintText.raycastTarget = false;
+
+            // --- 右上角常驻工具条：存档标志 + 设置齿轮 + 小房子（小房子呼出暂停菜单） ---
+            RectTransform topBarRt = NewRect(canvas.transform, "TopBar");
+            Anchor(topBarRt, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-150f, -52f), new Vector2(300f, 76f));
+
+            // 存档标志（小房子左边）
+            RectTransform badgeRt = NewRect(topBarRt, "SaveBadge");
+            Anchor(badgeRt, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-192f, -38f), new Vector2(120f, 64f));
+
+            RectTransform badgeIconRt = NewRect(badgeRt, "Icon");
+            Anchor(badgeIconRt, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, 26f), new Vector2(30f, 30f));
+            Image badgeIcon = badgeIconRt.gameObject.AddComponent<Image>();
+            badgeIcon.sprite = UiIcons.Save;
+            badgeIcon.raycastTarget = false;
+            badgeIcon.color = new Color(1f, 1f, 1f, 0.22f);
+
+            Text badgeLabel = NewText(badgeRt, "Label", "未存档", 14, new Color(1f, 1f, 1f, 0.25f), font);
+            Anchor(badgeLabel.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 12f), new Vector2(150f, 22f));
+            badgeLabel.alignment = TextAnchor.MiddleCenter;
+            badgeLabel.raycastTarget = false;
+
+            // 设置齿轮
+            RectTransform gearRt = NewRect(topBarRt, "SettingsButton");
+            Anchor(gearRt, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-92f, -38f), new Vector2(52f, 52f));
+            Image gearBg = gearRt.gameObject.AddComponent<Image>();
+            gearBg.color = new Color(1f, 1f, 1f, 0.10f);
+            Button gearBtn = gearRt.gameObject.AddComponent<Button>();
+            gearBtn.targetGraphic = gearBg;
+            RectTransform gearIconRt = NewRect(gearRt, "Icon");
+            StretchFull(gearIconRt);
+            gearIconRt.offsetMin = new Vector2(12f, 12f);
+            gearIconRt.offsetMax = new Vector2(-12f, -12f);
+            Image gearIcon = gearIconRt.gameObject.AddComponent<Image>();
+            gearIcon.sprite = UiIcons.Gear;
+            gearIcon.color = new Color(1f, 1f, 1f, 0.85f);
+            gearIcon.raycastTarget = false;
+
+            // 小房子：呼出暂停菜单
+            RectTransform houseRt = NewRect(topBarRt, "HomeShortcut");
+            Anchor(houseRt, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-36f, -38f), new Vector2(58f, 58f));
+            Image houseBg = houseRt.gameObject.AddComponent<Image>();
+            houseBg.color = new Color(1f, 1f, 1f, 0.10f);
+            Button houseBtn = houseRt.gameObject.AddComponent<Button>();
+            houseBtn.targetGraphic = houseBg;
+            RectTransform houseIconRt2 = NewRect(houseRt, "Icon");
+            StretchFull(houseIconRt2);
+            houseIconRt2.offsetMin = new Vector2(13f, 13f);
+            houseIconRt2.offsetMax = new Vector2(-13f, -13f);
+            Image houseIcon2 = houseIconRt2.gameObject.AddComponent<Image>();
+            houseIcon2.sprite = UiIcons.House;
+            houseIcon2.raycastTarget = false;
+            houseIcon2.color = new Color(1f, 0.97f, 0.9f, 0.95f);
+
+            TopBarUI topBar = topBarRt.gameObject.AddComponent<TopBarUI>();
+            topBar.saveIcon = badgeIcon;
+            topBar.saveLabel = badgeLabel;
+            topBar.houseButton = houseBtn;
+            topBar.houseIcon = houseIcon2;
+            topBar.gearButton = gearBtn;
+            topBar.gearIcon = gearIcon;
+
+            PauseMenu pause = pauseRt.gameObject.AddComponent<PauseMenu>();
+            pause.panel = pauseCg;
+            pause.panelImage = pauseBg;
+            pause.resumeButton = resumeBtn;
+            pause.saveButton = saveBtn;
+            pause.homeButton = homeBtn;
+            pause.quitButton = quitBtn;
+            pause.homeIcon = homeIcon;
+            pause.toastText = toastText;
+            pause.player = director.player;
+            pause.crosshair = cross;
+            pause.hintText = pauseHintText;
+            pause.audio = audio;
+            pause.flow = director;
+
+            // --- 设置面板：音量 / 亮度（主界面和游戏里共用一个） ---
+            RectTransform settingsRt = NewRect(canvas.transform, "SettingsPanel");
+            StretchFull(settingsRt);
+            Image settingsBg = settingsRt.gameObject.AddComponent<Image>();
+            settingsBg.color = new Color(0.02f, 0.02f, 0.035f, 0.80f);
+            settingsBg.raycastTarget = true;
+            if (blurMat != null) settingsBg.material = blurMat;
+
+            CanvasGroup settingsCg = settingsRt.gameObject.AddComponent<CanvasGroup>();
+            settingsCg.alpha = 0f;
+            settingsCg.blocksRaycasts = false;
+
+            Text settingsTitle = NewText(settingsRt, "Title", "设 置", 48,
+                new Color(0.95f, 0.93f, 0.88f, 1f), font);
+            Anchor(settingsTitle.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 220f), new Vector2(800f, 80f));
+            settingsTitle.raycastTarget = false;
+
+            Text volCaption = NewText(settingsRt, "VolumeLabel", "音量", 28,
+                new Color(1f, 1f, 1f, 0.75f), font);
+            Anchor(volCaption.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-300f, 100f), new Vector2(160f, 40f));
+            volCaption.alignment = TextAnchor.MiddleRight;
+            volCaption.raycastTarget = false;
+
+            Text volValue;
+            Slider volSlider = MakeSlider(settingsRt, "VolumeSlider", new Vector2(60f, 100f),
+                new Vector2(520f, 34f), 0.8f, font, out volValue);
+
+            Text brightCaption = NewText(settingsRt, "BrightnessLabel", "亮度", 28,
+                new Color(1f, 1f, 1f, 0.75f), font);
+            Anchor(brightCaption.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-300f, 10f), new Vector2(160f, 40f));
+            brightCaption.alignment = TextAnchor.MiddleRight;
+            brightCaption.raycastTarget = false;
+
+            Text brightValue;
+            Slider brightSlider = MakeSlider(settingsRt, "BrightnessSlider", new Vector2(60f, 10f),
+                new Vector2(520f, 34f), 0.85f, font, out brightValue);
+
+            Text closeLabel;
+            Button closeBtn = MakeButton(settingsRt, "CloseButton", "关 闭",
+                new Vector2(0f, -160f), new Vector2(300f, 66f), font, out closeLabel);
+
+            // 亮度遮罩：全屏黑，alpha 由设置驱动；排在黑幕/菜单之前，不会把菜单也压暗
+            RectTransform dimRt = NewRect(canvas.transform, "BrightnessOverlay");
+            StretchFull(dimRt);
+            Image dimImg = dimRt.gameObject.AddComponent<Image>();
+            dimImg.color = new Color(0f, 0f, 0f, 0.1f);
+            dimImg.raycastTarget = false;
+            dimRt.SetSiblingIndex(introRt.GetSiblingIndex());
+
+            SettingsPanel settings = settingsRt.gameObject.AddComponent<SettingsPanel>();
+            settings.panel = settingsCg;
+            settings.volumeSlider = volSlider;
+            settings.volumeValue = volValue;
+            settings.brightnessSlider = brightSlider;
+            settings.brightnessValue = brightValue;
+            settings.closeButton = closeBtn;
+            settings.brightnessOverlay = dimImg;
+
+            topBar.pauseMenu = pause;
+            topBar.settings = settings;
+            menu.settings = settings;
+            menu.topBar = topBarRt.gameObject;
+
+            // 准星常驻：创建顺序本来就在 Flash 之后、IntroBlack/MainMenu/PauseMenu 之前，
+            // 所以面板一盖就看不见，不需要 SetActive，也不要再动 sibling 顺序。
         }
 
         static IntroSequence _pendingIntro;
@@ -1040,6 +1267,86 @@ namespace Move1024.EditorTools
             return t;
         }
 
+        /// <summary>半透明文字按钮（暂停菜单用）。</summary>
+        static Button MakeButton(Transform parent, string name, string label, Vector2 pos, Vector2 size,
+            Font font, out Text labelText)
+        {
+            RectTransform rt = NewRect(parent, name);
+            Anchor(rt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), pos, size);
+
+            Image bg = rt.gameObject.AddComponent<Image>();
+            bg.color = new Color(1f, 1f, 1f, 0.12f);
+
+            Button btn = rt.gameObject.AddComponent<Button>();
+            btn.targetGraphic = bg;
+            ColorBlock cb = btn.colors;
+            cb.normalColor = new Color(1f, 1f, 1f, 0.12f);
+            cb.highlightedColor = new Color(1f, 1f, 1f, 0.26f);
+            cb.pressedColor = new Color(1f, 1f, 1f, 0.36f);
+            cb.selectedColor = new Color(1f, 1f, 1f, 0.12f);
+            btn.colors = cb;
+
+            labelText = NewText(rt, "Label", label, 30, new Color(1f, 1f, 1f, 0.92f), font);
+            StretchFull(labelText.rectTransform);
+            labelText.raycastTarget = false;
+            return btn;
+        }
+
+        /// <summary>滑条（音量 / 亮度）：轨道 + 填充 + 圆形手柄 + 右侧百分比。</summary>
+        static Slider MakeSlider(Transform parent, string name, Vector2 pos, Vector2 size, float value,
+            Font font, out Text valueLabel)
+        {
+            RectTransform root = NewRect(parent, name);
+            Anchor(root, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), pos, size);
+
+            RectTransform bg = NewRect(root, "Background");
+            StretchFull(bg);
+            bg.offsetMin = new Vector2(0f, 10f);
+            bg.offsetMax = new Vector2(0f, -10f);
+            Image bgImg = bg.gameObject.AddComponent<Image>();
+            bgImg.color = new Color(1f, 1f, 1f, 0.14f);
+
+            RectTransform fillArea = NewRect(root, "Fill Area");
+            StretchFull(fillArea);
+            fillArea.offsetMin = new Vector2(0f, 10f);
+            fillArea.offsetMax = new Vector2(0f, -10f);
+
+            RectTransform fill = NewRect(fillArea, "Fill");
+            fill.anchorMin = new Vector2(0f, 0f);
+            fill.anchorMax = new Vector2(1f, 1f);
+            fill.offsetMin = Vector2.zero;
+            fill.offsetMax = Vector2.zero;
+            Image fillImg = fill.gameObject.AddComponent<Image>();
+            fillImg.color = new Color(1f, 1f, 1f, 0.55f);
+
+            RectTransform handleArea = NewRect(root, "Handle Slide Area");
+            StretchFull(handleArea);
+
+            RectTransform handle = NewRect(handleArea, "Handle");
+            handle.sizeDelta = new Vector2(24f, 24f);
+            Image handleImg = handle.gameObject.AddComponent<Image>();
+            handleImg.sprite = UiIcons.Dot;
+            handleImg.color = new Color(1f, 1f, 1f, 0.95f);
+
+            Slider s = root.gameObject.AddComponent<Slider>();
+            s.fillRect = fill;
+            s.handleRect = handle;
+            s.targetGraphic = handleImg;
+            s.direction = Slider.Direction.LeftToRight;
+            s.minValue = 0f;
+            s.maxValue = 1f;
+            s.value = value;
+            s.transition = Selectable.Transition.None;
+
+            valueLabel = NewText(root, "Value", Mathf.RoundToInt(value * 100f) + "%", 22,
+                new Color(1f, 1f, 1f, 0.6f), font);
+            Anchor(valueLabel.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                new Vector2(58f, 0f), new Vector2(96f, 30f));
+            valueLabel.raycastTarget = false;
+
+            return s;
+        }
+
         static GameObject MakeBox(string name, Transform parent, Vector3 localPos, Vector3 scale, Material mat)
         {
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1191,6 +1498,106 @@ namespace Move1024.EditorTools
             tex.wrapMode = TextureWrapMode.Clamp;
             AssetDatabase.CreateAsset(tex, path);
             return tex;
+        }
+
+        /// <summary>
+        /// 用源物体自己的网格生成一层"灰尘壳"：顶点先按 localScale 烘成实际尺寸，
+        /// 再沿法线外扩 offset 米。这样灰尘完全贴合桌面几何（高低起伏都跟着），
+        /// 不再是飘在桌上的一块 Quad。网格存成资产，场景保存后才不会丢引用。
+        /// </summary>
+        static GameObject BuildDustShell(GameObject source, string name, float offset, Material mat)
+        {
+            Mesh src = null;
+            MeshFilter srcFilter = source.GetComponent<MeshFilter>();
+            if (srcFilter != null) src = srcFilter.sharedMesh;
+
+            Mesh mesh;
+            if (src == null)
+            {
+                // 兜底：源物体没有网格时退化成一个 1 米立方体
+                mesh = new Mesh();
+                mesh.name = name + "_Mesh";
+            }
+            else
+            {
+                Vector3 scale = source.transform.localScale;
+                Vector3[] verts = src.vertices;
+                Vector3[] normals = src.normals;
+                if (normals == null || normals.Length != verts.Length)
+                {
+                    src.RecalculateNormals();
+                    normals = src.normals;
+                }
+
+                for (int i = 0; i < verts.Length; i++)
+                    verts[i] = Vector3.Scale(verts[i], scale) + normals[i] * offset;
+
+                EnsureFolder("Assets/Meshes");
+                string path = "Assets/Meshes/" + name + "_Mesh.asset";
+                mesh = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+                if (mesh == null)
+                {
+                    mesh = new Mesh();
+                    mesh.name = name + "_Mesh";
+                    AssetDatabase.CreateAsset(mesh, path);
+                }
+
+                mesh.Clear();
+                mesh.vertices = verts;
+                mesh.normals = normals;
+                mesh.uv = src.uv;
+                mesh.uv2 = src.uv2;
+                mesh.triangles = src.triangles;
+                mesh.RecalculateBounds();
+                EditorUtility.SetDirty(mesh);
+                AssetDatabase.SaveAssets();
+            }
+
+            GameObject go = new GameObject(name);
+            go.transform.position = source.transform.position;
+            go.transform.rotation = source.transform.rotation;
+            go.transform.localScale = Vector3.one;
+
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+            MeshRenderer mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+
+            MeshCollider mc = go.AddComponent<MeshCollider>();
+            mc.sharedMesh = mesh;
+
+            return go;
+        }
+
+        /// <summary>暂停菜单的毛玻璃材质：Move1024/UIBlur（GrabPass 模糊 + 半透明深色）。</summary>
+        static Material GetBlurMaterial(string name)
+        {
+            Shader shader = Shader.Find("Move1024/UIBlur");
+            if (shader == null)
+            {
+                Debug.LogWarning("[1024] 找不到 Move1024/UIBlur 着色器，暂停菜单退回纯色遮罩");
+                return null;
+            }
+
+            EnsureFolder(MatDir);
+            string path = MatDir + "/" + name + ".mat";
+            Material m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(shader);
+                AssetDatabase.CreateAsset(m, path);
+            }
+            else if (m.shader != shader)
+            {
+                m.shader = shader;
+            }
+
+            m.SetColor("_Color", new Color(0.02f, 0.02f, 0.035f, 0.72f));
+            m.SetFloat("_BlurSize", 3.0f);
+            EditorUtility.SetDirty(m);
+            return m;
         }
 
         /// <summary>桌面上那层灰的贴图：灰底 + 噪点 + 横向纤维。运行时 DustErase 会复制一份再擦。</summary>

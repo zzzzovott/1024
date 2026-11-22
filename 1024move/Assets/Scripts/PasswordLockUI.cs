@@ -114,6 +114,27 @@ namespace Move1024
             Refresh();
         }
 
+        /// <summary>当前四位数字（读档/存档用）。</summary>
+        public string[] GetValues()
+        {
+            return new string[] { _values[0], _values[1], _values[2], _values[3] };
+        }
+
+        /// <summary>读档用：直接恢复四位数字，不触发校验、不触发 Unlocked。</summary>
+        public void RestoreSlots(string[] digits)
+        {
+            if (digits == null) return;
+            for (int i = 0; i < _values.Length; i++)
+                _values[i] = i < digits.Length && digits[i] != null ? digits[i] : "";
+
+            _filledCount = 0;
+            for (int i = 0; i < _values.Length; i++)
+                if (!string.IsNullOrEmpty(_values[i])) _filledCount++;
+
+            _unlocked = false;
+            Refresh();
+        }
+
         void Refresh()
         {
             for (int i = 0; i < slots.Length; i++)

@@ -11,7 +11,7 @@ namespace Move1024
     {
         public CanvasGroup black;
         public InnerMonologue monologue;
-        public Player25DController player;
+        public FPSController player;
 
         [Header("文本")]
         [TextArea(2, 4)]
@@ -67,6 +67,20 @@ namespace Move1024
             if (_started || _done) return;
             _started = true;
             StartCoroutine(Routine());
+        }
+
+        /// <summary>读档直接进游戏：跳过开场，黑幕立刻收掉并交还操作。</summary>
+        public void Skip()
+        {
+            _started = true;
+            _done = true;
+            StopAllCoroutines();
+            if (black != null)
+            {
+                black.alpha = 0f;
+                black.blocksRaycasts = false;
+            }
+            if (player != null) player.SetInputEnabled(true);
         }
 
         static bool HasArg(string key)

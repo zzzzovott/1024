@@ -165,6 +165,15 @@ namespace Move1024
             OnSolved();
         }
 
+        /// <summary>读档用：直接把物件恢复成"已解开"，不触发事件、不播放记忆片段。</summary>
+        public void RestoreSolved()
+        {
+            puzzleSolvedFlag = true;
+            progress = 1f;
+            if (rotator != null) rotator.SetInteractable(false);
+            ApplySpot(1f);
+        }
+
         public void ResetObject()
         {
             puzzleSolvedFlag = false;

@@ -32,6 +32,10 @@ namespace Move1024
         [Tooltip("每转满一圈转轮转多少度")]
         public float reelDegreesPerCircle = 360f;
 
+        [Header("光标锁定时的替代输入")]
+        [Tooltip("第一人称光标锁定时没有可用光标坐标，用鼠标位移折算成角度：每个鼠标单位算多少度")]
+        public float degreesPerMouseUnit = 9f;
+
         [Header("完成演出")]
         public AudioVisualizer visualizer;
         public float humDuration = 7f;
@@ -84,6 +88,16 @@ namespace Move1024
                 return;
             }
 
+            // 光标锁定（第一人称持握）：光标坐标不可用，用鼠标位移累计"画圈"的转角
+            if (Cursor.lockState == CursorLockMode.Locked)
+            {
+                float dx = Input.GetAxisRaw("Mouse X");
+                float dy = Input.GetAxisRaw("Mouse Y");
+                ApplySweep((Mathf.Abs(dx) + Mathf.Abs(dy)) * degreesPerMouseUnit);
+                _hasPrev = false;
+                return;
+            }
+
             Vector3 sp = Camera.main != null
                 ? Camera.main.WorldToScreenPoint(transform.position)
                 : (Vector3)Input.mousePosition;
@@ -113,11 +127,19 @@ namespace Move1024
             // 单帧超过 40° 基本是瞬移/切窗口，丢掉
             if (Mathf.Abs(delta) > 40f) return;
 
-            _accum += Mathf.Abs(delta);
+            ApplySweep(Mathf.Abs(delta));
+        }
+
+        /// <summary>累加一次转角（度），并处理圈数、进度、完成判定。</summary>
+        void ApplySweep(float degrees)
+        {
+            if (degrees <= 0.0001f) return;
+
+            _accum += degrees;
 
             // 转轮绕自己的轴转（磁带轮是圆柱，轴是 Y）
             if (reel != null)
-                reel.Rotate(0f, -delta, 0f, Space.Self);
+                reel.Rotate(0f, -degrees, 0f, Space.Self);
 
             int turns = Mathf.FloorToInt(_accum / 360f);
             if (turns > _turns)
