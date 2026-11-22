@@ -141,6 +141,7 @@ namespace Move1024
             Time.timeScale = 0f;
 
             if (audio != null) audio.PlayClick();
+            if (audio != null) audio.SetMusicDucked(true);
         }
 
         public void Resume()
@@ -159,6 +160,7 @@ namespace Move1024
             if (player != null) player.SetInputEnabled(true);    // 会重新锁定鼠标
 
             if (audio != null) audio.PlayClick();
+            if (audio != null) audio.SetMusicDucked(false);
         }
 
         /// <summary>返回主界面：直接重载场景，主菜单会重新出现。</summary>

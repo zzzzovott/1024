@@ -3,149 +3,117 @@ using UnityEngine;
 namespace Move1024
 {
     /// <summary>
-    /// 3D 旧物的"手感"核心：鼠标拖拽 → 带阻尼与惯性的自由旋转。
-    /// 用轨迹球式（相机空间）旋转，比屏幕 XY 轴更符合直觉：任何机位下都不会"转不动"。
-    /// 挂在物件根节点上，需要 Collider 才能被 OnMouseDrag 命中。
+    /// 轨迹球式自由旋转（完全替换旧的"单轴拨盘"逻辑）：
+    ///
+    /// · 鼠标左右滑 → 绕**相机的上轴**转；上下滑 → 绕**相机的右轴**转；
+    /// · XYZ 三轴全开，**没有任何角度限制 / Clamp**，可以无限 360° 翻转；
+    /// · 旋转基于摄像机局部空间，所以不管玩家从哪个方向看，手感都一致；
+    /// · 目标四元数 + Quaternion.Slerp 阻尼，手感平滑不生硬；
+    /// · 调试：按住左键拖动时，控制台实时打印当前欧拉角（间隔可调），
+    ///   拿起物体时会打印一次目标角度，方便对照。
     /// </summary>
     public class DragRotateBody : MonoBehaviour
     {
         [Header("手感")]
-        [Tooltip("鼠标位移 → 旋转角度倍率（Unity 的 Mouse X 已是 像素×0.1）")]
-        public float dragSensitivity = 5f;
-
-        [Header("转轴限制（拨盘）")]
-        [Tooltip("勾上后只能绕一根轴转，像拨转盘。自由三轴会让玩家在 3D 空间里瞎找角度。")]
-        public bool axisLock = true;
-        [Tooltip("锁定的世界坐标轴")]
-        public Vector3 lockAxis = Vector3.up;
-        [Tooltip("松手后角速度衰减速度（越大停得越快）")]
-        public float angularDamping = 3.2f;
+        [Tooltip("鼠标位移 → 旋转角度倍率")]
+        public float dragSensitivity = 4f;
+        [Tooltip("阻尼：越大跟手越紧（6 = 有点飘，20 = 很跟手）")]
+        public float smoothing = 14f;
         [Tooltip("松手后保留的角速度比例")]
-        [Range(0f, 1f)] public float inertiaRetain = 0.55f;
-        [Tooltip("角速度上限（度/秒），防止甩飞")]
-        public float maxAngularSpeed = 520f;
+        [Range(0f, 1f)] public float inertiaRetain = 0.3f;
+        [Tooltip("惯性衰减速度")]
+        public float angularDamping = 3f;
+        [Tooltip("角速度上限（度/秒），只防甩飞，不影响角度范围")]
+        public float maxAngularSpeed = 900f;
 
-        [Header("吸附")]
-        [Tooltip("吸附时的插值时长")]
-        public float snapDuration = 0.25f;
-
-        [Header("持握模式")]
-        [Tooltip("光标锁定时用：不需要指针悬停在物体上，按住左键拖动即可旋转（拾取到手里的物件用）")]
-        public bool dragWithoutPointer = false;
+        [Header("调试")]
+        public bool debugLog = true;
+        [Tooltip("拖动时打印欧拉角的间隔（秒）")]
+        public float debugInterval = 0.1f;
+        [Tooltip("拿起时打印目标角度")]
+        public bool logTargetOnEnable = true;
 
         [Header("状态")]
         public bool interactable = true;
 
+        Quaternion _target;
         Vector3 _angularVelocity;
         bool _dragging;
-        bool _snapping;
         Camera _cam;
+        float _nextLogAt;
 
-        public bool IsInteracting { get { return _dragging || _snapping; } }
+        public bool IsInteracting { get { return _dragging; } }
 
         void Awake()
         {
             _cam = Camera.main;
-        }
-
-        public void SetInteractable(bool value)
-        {
-            interactable = value;
-            if (!value)
-            {
-                _dragging = false;
-                _snapping = false;
-                _angularVelocity = Vector3.zero;
-            }
+            _target = transform.rotation;
         }
 
         void Update()
         {
             if (!interactable) return;
-
             if (_cam == null) _cam = Camera.main;
 
-            if (Input.GetMouseButtonUp(0) && _dragging)
+            HandleDrag();
+            ApplyInertia();
+            SmoothRotate();
+            LogAngles();
+        }
+
+        /// <summary>拿起/放下时调用；拿起时把当前朝向作为起点，并打印目标角度。</summary>
+        public void SetInteractable(bool value)
+        {
+            interactable = value;
+
+            if (value)
+            {
+                _target = transform.rotation;
+                _angularVelocity = Vector3.zero;
+                _dragging = false;
+
+                if (debugLog && logTargetOnEnable) LogTarget();
+            }
+            else
             {
                 _dragging = false;
-                _angularVelocity *= inertiaRetain;
+                _angularVelocity = Vector3.zero;
+                _target = transform.rotation;
             }
+        }
 
-            // 持握模式：光标锁定时 OnMouseDrag 拿不到指针，改为直接读鼠标位移
-            if (dragWithoutPointer)
+        void HandleDrag()
+        {
+            if (!Input.GetMouseButton(0))
             {
-                if (Input.GetMouseButton(0) && !_snapping)
-                {
-                    _dragging = true;
-                    float mdx = Input.GetAxisRaw("Mouse X") * dragSensitivity;
-                    float mdy = Input.GetAxisRaw("Mouse Y") * dragSensitivity;
-                    if (Mathf.Abs(mdx) + Mathf.Abs(mdy) > 0.0001f) ApplyDragDelta(mdx, mdy);
-                }
-                else if (_dragging)
+                if (_dragging)
                 {
                     _dragging = false;
                     _angularVelocity *= inertiaRetain;
                 }
+                return;
             }
-
-            if (_dragging || _snapping) return;
-
-            if (_angularVelocity.sqrMagnitude > 0.0001f)
-            {
-                if (axisLock && lockAxis.sqrMagnitude > 0.0001f)
-                    _angularVelocity = Vector3.Project(_angularVelocity, lockAxis.normalized);
-
-                float speed = _angularVelocity.magnitude;
-                transform.rotation = Quaternion.AngleAxis(speed * Time.deltaTime, _angularVelocity / speed) * transform.rotation;
-                _angularVelocity = Vector3.Lerp(_angularVelocity, Vector3.zero, 1f - Mathf.Exp(-angularDamping * Time.deltaTime));
-                if (_angularVelocity.magnitude < 1.5f) _angularVelocity = Vector3.zero;
-            }
-        }
-
-        void OnMouseDrag()
-        {
-            if (!interactable || _snapping || dragWithoutPointer) return;
 
             float dx = Input.GetAxisRaw("Mouse X") * dragSensitivity;
             float dy = Input.GetAxisRaw("Mouse Y") * dragSensitivity;
-            ApplyDragDelta(dx, dy);
-        }
+            if (Mathf.Abs(dx) + Mathf.Abs(dy) < 0.0001f) return;
 
-        /// <summary>把一次鼠标位移（已经乘过灵敏度）应用到旋转上。</summary>
-        void ApplyDragDelta(float dx, float dy)
-        {
             _dragging = true;
-            if (_cam == null) _cam = Camera.main;
-            if (_cam == null) return;
 
-            Quaternion delta;
-            if (axisLock)
-            {
-                // 拨盘模式：只绕一根轴转。左右拖是主方向，上下拖给一点微调，
-                // 免得玩家竖着拖发现没反应。
-                Vector3 axis = lockAxis.sqrMagnitude > 0.0001f ? lockAxis.normalized : Vector3.up;
-                float turn = -dx + dy * 0.35f;
-                delta = Quaternion.AngleAxis(turn, axis);
-            }
-            else
-            {
-                delta =
-                    Quaternion.AngleAxis(-dx, _cam.transform.up) *
-                    Quaternion.AngleAxis(dy, _cam.transform.right);
-            }
+            Transform cam = _cam != null ? _cam.transform : transform;
 
-            Quaternion before = transform.rotation;
-            transform.rotation = delta * transform.rotation;
+            // 轨迹球：左右绕相机上轴，上下绕相机右轴（世界空间叠加，无任何限制）
+            Quaternion delta =
+                Quaternion.AngleAxis(-dx, cam.up) *
+                Quaternion.AngleAxis(dy, cam.right);
 
-            RecordVelocity(before, transform.rotation);
-        }
+            _target = delta * _target;
 
-        void RecordVelocity(Quaternion before, Quaternion after)
-        {
-            Quaternion d = after * Quaternion.Inverse(before);
+            // 记录角速度给惯性用（只受 maxAngularSpeed 影响，不影响角度范围）
+            Quaternion change = _target * Quaternion.Inverse(transform.rotation);
             float angle;
             Vector3 axis;
-            d.ToAngleAxis(out angle, out axis);
+            change.ToAngleAxis(out angle, out axis);
             if (angle > 180f) { angle = 360f - angle; axis = -axis; }
 
             float dt = Mathf.Max(Time.deltaTime, 0.0001f);
@@ -154,41 +122,83 @@ namespace Move1024
             _angularVelocity = v;
         }
 
-        /// <summary>平滑吸附到目标朝向（由光影判定调用）。</summary>
-        public void SnapTo(Quaternion target, float duration = -1f)
+        void ApplyInertia()
         {
-            if (!interactable) return;
-            StopAllCoroutines();
-            StartCoroutine(SnapRoutine(target, duration < 0f ? snapDuration : duration));
+            if (_dragging) return;
+            if (_angularVelocity.sqrMagnitude < 1f) return;
+
+            Quaternion spin = Quaternion.AngleAxis(
+                _angularVelocity.magnitude * Time.deltaTime,
+                _angularVelocity.normalized);
+
+            _target = spin * _target;
+
+            _angularVelocity = Vector3.Lerp(
+                _angularVelocity, Vector3.zero, 1f - Mathf.Exp(-angularDamping * Time.deltaTime));
+
+            if (_angularVelocity.magnitude < 2f) _angularVelocity = Vector3.zero;
         }
 
-        System.Collections.IEnumerator SnapRoutine(Quaternion target, float duration)
+        void SmoothRotate()
         {
-            _snapping = true;
-            _dragging = false;
-            _angularVelocity = Vector3.zero;
+            float k = 1f - Mathf.Exp(-smoothing * Time.deltaTime);
+            transform.rotation = Quaternion.Slerp(transform.rotation, _target, k);
+        }
 
-            Quaternion from = transform.rotation;
-            float t = 0f;
-            while (t < duration)
-            {
-                t += Time.deltaTime;
-                float u = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t / duration));
-                transform.rotation = Quaternion.Slerp(from, target, u);
-                yield return null;
-            }
-            transform.rotation = target;
-            _snapping = false;
+        /// <summary>平滑吸附到目标朝向（光影判定用）。</summary>
+        public void SnapTo(Quaternion target, float duration = -1f)
+        {
+            _angularVelocity = Vector3.zero;
+            _dragging = false;
+            _target = target;
+        }
+
+        /// <summary>磁吸辅助：把手上目标朝向缓慢拉向答案（玩家仍在拖拽也不会打架）。</summary>
+        public void AssistToward(Quaternion target, float rate)
+        {
+            float k = 1f - Mathf.Exp(-Mathf.Max(0.01f, rate) * Time.deltaTime);
+            _target = Quaternion.Slerp(_target, target, k);
         }
 
         /// <summary>硬设朝向（重置用）。</summary>
         public void SetRotationImmediate(Quaternion q)
         {
-            StopAllCoroutines();
-            _snapping = false;
             _dragging = false;
             _angularVelocity = Vector3.zero;
+            _target = q;
             transform.rotation = q;
+        }
+
+        // ---------------- 调试 ----------------
+
+        void LogAngles()
+        {
+            if (!debugLog || !_dragging) return;
+            if (Time.time < _nextLogAt) return;
+
+            _nextLogAt = Time.time + Mathf.Max(0.02f, debugInterval);
+            Vector3 e = transform.eulerAngles;
+            Debug.Log("[1024][Rotate] " + name + " Euler=(" +
+                      e.x.ToString("F1") + ", " + e.y.ToString("F1") + ", " + e.z.ToString("F1") + ")");
+        }
+
+        void LogTarget()
+        {
+            Vector3 e = transform.eulerAngles;
+
+            ShadowAlignPuzzle puzzle = GetComponent<ShadowAlignPuzzle>();
+            if (puzzle != null)
+            {
+                Vector3 t = puzzle.targetRotation.eulerAngles;
+                Debug.Log("[1024][Rotate] 拿起 " + name +
+                          "  当前=(" + e.x.ToString("F1") + ", " + e.y.ToString("F1") + ", " + e.z.ToString("F1") + ")" +
+                          "  目标=(" + t.x.ToString("F1") + ", " + t.y.ToString("F1") + ", " + t.z.ToString("F1") + ")");
+            }
+            else
+            {
+                Debug.Log("[1024][Rotate] 拿起 " + name + "  当前=(" +
+                          e.x.ToString("F1") + ", " + e.y.ToString("F1") + ", " + e.z.ToString("F1") + ")");
+            }
         }
     }
 }

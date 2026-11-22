@@ -295,10 +295,20 @@ namespace Move1024
                                 hint = rag.IsHeld ? rag.dropHint : rag.hoverHint;
                                 HoveredCollider = col;
                             }
-                            else if (HasInteractableTag(col))
+                            else
                             {
-                                hint = "点击查看";
-                                HoveredCollider = col;
+                                // 通用提示源：杂物 / 旧衣服 / 铁盒 等都挂这个
+                                PromptSource source = col.GetComponentInParent<PromptSource>();
+                                if (source != null && !string.IsNullOrEmpty(source.hint))
+                                {
+                                    hint = source.hint;
+                                    HoveredCollider = col;
+                                }
+                                else if (HasInteractableTag(col))
+                                {
+                                    hint = "点击查看";
+                                    HoveredCollider = col;
+                                }
                             }
                         }
                     }
@@ -323,8 +333,8 @@ namespace Move1024
         bool HasInteractableTag(Collider col)
         {
             if (string.IsNullOrEmpty(interactableTag)) return false;
-            try { return col.CompareTag(interactableTag); }
-            catch (UnityException) { return false; }   // 项目里还没定义这个标签
+            // 用字符串比较而不是 CompareTag：项目里没定义这个标签时 CompareTag 会抛异常并刷错误
+            return col.tag == interactableTag;
         }
 
         void SetLook(bool hover, string text)

@@ -24,6 +24,16 @@ namespace Move1024
             Ending
         }
 
+        /// <summary>主线阶段：锁死流程，防止乱点穿帮。</summary>
+        public enum Stage
+        {
+            EnterWithBox = 1,   // 刚进门：只能放箱子
+            TidyClutter = 2,    // 整理杂物：只能捡杂物丢箱子
+            DiscoverBox = 3,    // 发现铁盒：掀旧衣服、点铁盒
+            FindClues = 4,      // 寻找线索：旧物 / 电视解锁
+            Puzzle = 5          // 解谜中
+        }
+
         [Header("引用")]
         public FPSController player;
         public CameraStateRig cameraRig;   // 第一人称下不再使用（留字段避免旧引用报错）
@@ -68,9 +78,21 @@ namespace Move1024
         [Header("关卡物件")]
         public List<DeskFocusInteractable> interactables = new List<DeskFocusInteractable>();
 
+        [Header("主线阶段（锁死顺序）")]
+        [SerializeField] Stage stage = Stage.EnterWithBox;
+        [Tooltip("收几件杂物后推进到'发现铁盒'")]
+        public int clutterToFindBox = 3;
+        public Stage CurrentStage { get { return stage; } }
+        public bool CanTidy { get { return stage == Stage.TidyClutter; } }
+        public bool CanDiscoverBox { get { return stage == Stage.DiscoverBox; } }
+        public bool CanUseProps { get { return stage == Stage.FindClues || stage == Stage.Puzzle; } }
+        public event Action<Stage> StageChanged;
+
         [Header("第四个数字")]
         [Tooltip("退租合同（点它打开擦灰面板）")]
         public GameObject contractHotspot;
+        [Tooltip("合同 Hitbox 上的准星提示（解锁后才显示）")]
+        public PromptSource contractPrompt;
         [Tooltip("解完三件之前，合同不可点（避免跳关）")]
         public bool lockContractUntilSolved = true;
 
@@ -161,8 +183,9 @@ namespace Move1024
             UpdateHover();
             UpdateGuidance();
 
-            // 发呆防卡关：15 秒没进展就提示一句，之后每 25 秒再提一次
-            if ((state == State.Explore || state == State.Walking) && Time.time >= _nextIdleHint)
+            // 发呆防卡关：进入"发现铁盒"之后才开始提示，避免开局就聒噪
+            if ((state == State.Explore || state == State.Walking) &&
+                stage >= Stage.DiscoverBox && Time.time >= _nextIdleHint)
             {
                 _nextIdleHint = Time.time + 25f;
                 SayDialogue(DialogueKeys.IdlePhase3);
@@ -170,6 +193,7 @@ namespace Move1024
 
             if (Input.GetKeyDown(KeyCode.F1)) debugAngles = !debugAngles;
             if (debugAngles) DrawAngleDebug();
+            else UpdateDeskAlignment();
 
             if (Input.GetKeyDown(KeyCode.R))
             {
@@ -194,7 +218,7 @@ namespace Move1024
                         if (player != null &&
                             Vector3.Distance(player.transform.position, _hovered.transform.position) > interactDistance)
                         {
-                            if (monologue != null) monologue.Say("走近一点再拾取。");
+                            SayDialogue(DialogueKeys.TooFar);
                             return;
                         }
 
@@ -225,6 +249,15 @@ namespace Move1024
         void BeginPickup(DeskFocusInteractable it)
         {
             if (it == null || it.PuzzleSolvedFlag || _held) return;
+
+            // 阶段锁：铁盒被发现之前，桌上的旧物不可交互
+            if (!CanUseProps)
+            {
+                SayDialogue(DialogueKeys.PropLocked);
+                return;
+            }
+
+            if (stage == Stage.FindClues) SetStage(Stage.Puzzle);
 
             _current = it;
             _held = true;
@@ -282,8 +315,7 @@ namespace Move1024
 
             if (it.rotator != null)
             {
-                it.rotator.dragWithoutPointer = true;   // 光标锁定：直接读鼠标位移
-                it.rotator.SetInteractable(true);
+                it.rotator.SetInteractable(true);   // 三轴自由旋转，光标锁定也能直接读鼠标位移
             }
             if (it.rewindPuzzle != null) it.rewindPuzzle.SetInteractable(true);
 
@@ -319,7 +351,6 @@ namespace Move1024
 
             if (it.rotator != null)
             {
-                it.rotator.dragWithoutPointer = false;
                 it.rotator.SetInteractable(false);
             }
             if (it.rewindPuzzle != null) it.rewindPuzzle.SetInteractable(false);
@@ -430,14 +461,30 @@ namespace Move1024
             EndPickup(false);
         }
 
-        /// <summary>给玩家的分步引导（探索阶段常驻在屏幕下方）。</summary>
+        /// <summary>给玩家的分步引导（按主线阶段切换）。</summary>
         string GuidanceText()
         {
-            if (rag != null && !rag.IsHeld) return "① 纸箱旁有块抹布：准星对准它，按 F 拾取";
-            if (dust != null && dust.IsActive) return "② 走到桌前，准星对准桌面，按住左键滑动擦灰（F 可放下抹布）";
-            if (interactables != null && solvedCount < interactables.Count)
-                return "③ 准星对准桌上的旧物，按 F 拾取并解谜";
-            return "④ 桌面那份退租合同可以擦了（按住左键滑动）";
+            switch (stage)
+            {
+                case Stage.EnterWithBox:
+                    return "① 怀里这箱先放下：准星对准空地，点击左键";
+
+                case Stage.TidyClutter:
+                    return "② 收拾杂物：对准地上的杂物左键捡起，再对准大纸箱左键扔进去（已收 " + _clutterStored + " 件）";
+
+                case Stage.DiscoverBox:
+                    return "③ 桌上那堆旧衣服下面好像压着什么，掀开看看";
+
+                case Stage.FindClues:
+                    if (dust != null && dust.IsActive)
+                        return (rag != null && rag.IsHeld)
+                            ? "④ 先把桌子擦干净：对准桌面按住左键滑动"
+                            : "④ 桌子太脏了，先去纸箱旁找块抹布（F 拾取）";
+                    return "④ 看看桌上的旧物和老电视，按 F 拿起";
+
+                default:
+                    return "⑤ 转动旧物，让它的影子对上墙上的图案";
+            }
         }
 
         void UpdateGuidance()
@@ -471,19 +518,67 @@ namespace Move1024
             SayDialogue(DialogueKeys.DustNoRag);
         }
 
-        /// <summary>按文案表 id 说一句（打字机）。</summary>
+        /// <summary>按文案表 id 说一句（统一走 DialogueManager 的严格队列）。</summary>
         public void SayDialogue(string id)
         {
-            if (monologue == null) return;
             string text = DialogueConfig.Get(id, "");
-            if (!string.IsNullOrEmpty(text)) monologue.Say(text);
+            if (!string.IsNullOrEmpty(text)) DialogueManager.Say(text);
         }
 
-        /// <summary>旧物放进纸箱（ClutterPickup 调用）。连续放两件会触发一句 OS。</summary>
+        /// <summary>旧物放进纸箱（ClutterPickup 调用）。放够数量推进到"发现铁盒"。</summary>
         public void OnClutterStored()
         {
+            if (stage != Stage.TidyClutter) return;
+
             _clutterStored++;
-            if (_clutterStored == 2) SayDialogue(DialogueKeys.ClutterStored2);
+
+            if (_clutterStored >= clutterToFindBox)
+            {
+                // 先推进阶段（会强制清屏），再给这一步的提示
+                SetStage(Stage.DiscoverBox);
+                SayDialogue(DialogueKeys.ClutterEnough);
+            }
+            else
+            {
+                SayDialogue(RandomClutterJoke());
+            }
+        }
+
+        /// <summary>CarryingBox：箱子放下。</summary>
+        public void OnBoxDropped()
+        {
+            if (stage != Stage.EnterWithBox) return;
+            SetStage(Stage.TidyClutter);
+            SayDialogue(DialogueKeys.BoxDropped);
+        }
+
+        /// <summary>IronBoxInteract：翻过衣服、看过铁盒但打不开。</summary>
+        public void OnIronBoxViewed()
+        {
+            if (stage != Stage.DiscoverBox) return;
+
+            SetStage(Stage.FindClues);
+            SayDialogue(DialogueKeys.LockLocked);
+            SayDialogue(DialogueKeys.CluesUnlocked);
+        }
+
+        void SetStage(Stage next)
+        {
+            if (stage == next) return;
+
+            stage = next;
+
+            // 状态推进时立刻清屏：当前句 + 排队全部丢掉，避免旧台词串到新阶段
+            if (DialogueManager.Instance != null) DialogueManager.Instance.ClearNow();
+
+            if (StageChanged != null) StageChanged(next);
+            UpdateGuidance();
+        }
+
+        string RandomClutterJoke()
+        {
+            int index = UnityEngine.Random.Range(1, 5);
+            return "clutter_joke_" + index;
         }
 
         void OnAllObjectsSolved()
@@ -491,8 +586,7 @@ namespace Move1024
             SetState(State.Explore);
             SetContractAvailable(true);
 
-            if (monologue != null)
-                monologue.Say("还差最后一位……桌上那份退租合同，好像一直没细看过。");
+            if (monologue != null) DialogueManager.Say("还差最后一位……桌上那份退租合同，好像一直没细看过。");
             if (exploreHintText != null)
                 exploreHintText.text = "桌上那份退租合同可以点了";
 
@@ -506,6 +600,12 @@ namespace Move1024
 
             Collider[] cols = contractHotspot.GetComponentsInChildren<Collider>(true);
             for (int i = 0; i < cols.Length; i++) cols[i].enabled = on;
+
+            if (contractPrompt != null)
+            {
+                if (on) contractPrompt.SetHint(DialogueConfig.Get(DialogueKeys.ContractPrompt, "[点击 查看退租合同]"));
+                else contractPrompt.Clear();
+            }
         }
 
         void OnContractRevealed()
@@ -581,6 +681,24 @@ namespace Move1024
                     crosshair.SetOverrideLabel(null);
                 }
             }
+        }
+
+        /// <summary>特写时在屏幕下方实时显示"对齐度"，让玩家知道自己在靠近答案。</summary>
+        void UpdateDeskAlignment()
+        {
+            if (state != State.Desk || _current == null || deskHintText == null) return;
+
+            ShadowAlignPuzzle puzzle = _current.anglePuzzle;
+            if (puzzle == null) return;
+
+            int pct = Mathf.RoundToInt(puzzle.Similarity * 100f);
+
+            string hint;
+            if (pct >= 80) hint = "快对上了 · 对齐度 " + pct + "%";
+            else if (pct >= 40) hint = "对齐度 " + pct + "% · 继续转";
+            else hint = "调整角度，让影子投在墙上";
+
+            if (deskHintText.text != hint) deskHintText.text = hint;
         }
 
         void DrawAngleDebug()

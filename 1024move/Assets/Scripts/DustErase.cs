@@ -192,11 +192,16 @@ namespace Move1024
 
         void Update()
         {
-            if (_cleared) return;
+            if (_cleared)
+            {
+                if (audio != null) audio.SetWipe(false);
+                return;
+            }
 
             // 没有抹布就擦不动，并给一次"得先找块抹布"的提示
             if (!HasRag)
             {
+                if (audio != null) audio.SetWipe(false);
                 TryWarnNoRag();
                 return;
             }
@@ -204,11 +209,16 @@ namespace Move1024
             bool holding = Input.GetMouseButton(0);
             if (!holding)
             {
+                if (audio != null) audio.SetWipe(false);
                 if (brushMarker != null && brushMarker.activeSelf) brushMarker.SetActive(false);
                 return;
             }
 
-            if (!IsInRange) return;
+            if (!IsInRange)
+            {
+                if (audio != null) audio.SetWipe(false);
+                return;
+            }
 
             Camera cam = Camera.main;
             if (cam == null) return;
@@ -217,11 +227,22 @@ namespace Move1024
                 ? cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f))
                 : cam.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
-            if (!Physics.Raycast(ray, out hit, maxRayDistance)) return;
-            if (hit.collider != _col) return;
+            if (!Physics.Raycast(ray, out hit, maxRayDistance))
+            {
+                if (audio != null) audio.SetWipe(false);
+                return;
+            }
+            if (hit.collider != _col)
+            {
+                if (audio != null) audio.SetWipe(false);
+                return;
+            }
 
             ShowBrush(hit.point, hit.normal);
             Erase(hit.textureCoord);
+
+            // 真的擦到桌面时才响"沙沙"
+            if (audio != null) audio.SetWipe(true);
         }
 
         float _nextNoRagWarn;
@@ -304,6 +325,7 @@ namespace Move1024
             if (_cleared) return;
             _cleared = true;
 
+            if (audio != null) audio.SetWipe(false);
             if (brushMarker != null) brushMarker.SetActive(false);
 
             if (showAfterClear != null)

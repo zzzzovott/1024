@@ -23,12 +23,23 @@ namespace Move1024
 
         void Start()
         {
-            if (prompt != null) prompt.SetHint(DialogueConfig.Get(DialogueKeys.ClothPrompt, "[左键 挪开旧衣服]"));
+            if (prompt != null) prompt.SetHint(DialogueConfig.Get(DialogueKeys.ClothPrompt, "[左键 掀开旧衣服]"));
         }
 
         void Update()
         {
             if (_moved) return;
+
+            // 阶段锁：只有"发现铁盒"阶段才能掀衣服
+            if (director != null && !director.CanDiscoverBox)
+            {
+                if (prompt != null) prompt.Clear();
+                return;
+            }
+
+            if (prompt != null && string.IsNullOrEmpty(prompt.hint))
+                prompt.SetHint(DialogueConfig.Get(DialogueKeys.ClothPrompt, "[左键 掀开旧衣服]"));
+
             if (!Input.GetMouseButtonDown(0)) return;
 
             if (crosshair == null || crosshair.HoveredCollider == null) return;
@@ -52,7 +63,7 @@ namespace Move1024
 
             StartCoroutine(MoveRoutine());
 
-            if (audio != null) audio.PlayKnock();
+            if (audio != null) audio.PlayMetal();
             if (director != null) director.SayDialogue(DialogueKeys.ClothMoved);
             if (ironBox != null) ironBox.enabled = true;
         }

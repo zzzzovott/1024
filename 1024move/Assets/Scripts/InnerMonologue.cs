@@ -36,6 +36,9 @@ namespace Move1024
         bool _running;
         Coroutine _co;
 
+        /// <summary>是否还有文本在播（被 DialogueManager 用来串行排队）。</summary>
+        public bool IsPlaying { get { return _running || _queue.Count > 0; } }
+
         void Awake()
         {
             if (group == null && target != null) group = target.GetComponent<CanvasGroup>();

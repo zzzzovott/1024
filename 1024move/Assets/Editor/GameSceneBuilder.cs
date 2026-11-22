@@ -298,6 +298,8 @@ namespace Move1024.EditorTools
             BoxCollider contractCol = contractHit.AddComponent<BoxCollider>();
             contractCol.size = new Vector3(0.38f, 0.10f, 0.30f);
             contractCol.center = new Vector3(0f, 0.03f, 0f);
+            // 准星要能认出它（否则 HoveredCollider 一直是 null，点不到）
+            PromptSource contractPrompt = contractHit.AddComponent<PromptSource>();
 
             // ---------- 流程 ----------
             GameObject flowGo = new GameObject("GameFlow");
@@ -306,6 +308,7 @@ namespace Move1024.EditorTools
             // 第一人称：没有固定机位，CameraStateRig 不再挂载（cameraRig 留空，流程脚本里都有 null 判断）
             director.interactables = interactables;
             director.contractHotspot = contract;
+            director.contractPrompt = contractPrompt;
             director.lockBox = box;
             director.holdAnchor = holdGo.transform;
             // 第一人称：玩家自己走到桌前，拾取不再自动导航、也不闪白光
@@ -419,6 +422,7 @@ namespace Move1024.EditorTools
             TVInteraction tv = tvRoot.AddComponent<TVInteraction>();
             tv.player = playerGo.transform;      // 距离判定用
             tv.maxPlayerDistance = 2.0f;
+            tv.director = director;
             tv.spotLight = tvSpot;
             tv.screenRenderer = tvScreenRend;
             tv.audio = audioDirector;
@@ -507,11 +511,11 @@ namespace Move1024.EditorTools
 
             DragRotateBody rot = go.AddComponent<DragRotateBody>();
             rot.dragSensitivity = 5f;
+            rot.smoothing = 14f;
             rot.angularDamping = 3.0f;
-            rot.inertiaRetain = 0.55f;
+            rot.inertiaRetain = 0.35f;
             rot.interactable = false;
-            rot.axisLock = true;
-            rot.lockAxis = Vector3.up;
+            rot.debugLog = true;
 
             // 两种关卡类型：转角度 / 画圈倒带
             ShadowAlignPuzzle puzzle = null;
@@ -529,11 +533,14 @@ namespace Move1024.EditorTools
                 puzzle.rotator = rot;
                 puzzle.captureCurrentOnStart = false;
                 puzzle.targetRotation = Quaternion.Euler(targetEuler);
-                puzzle.enterTolerance = 10f;
-                puzzle.exitTolerance = 13f;
+                puzzle.enterTolerance = 26f;
+                puzzle.exitTolerance = 30f;
                 puzzle.useMagnet = true;
                 // 整圈都要有亮度反馈，玩家才能"转到最亮的地方"
-                puzzle.fadeRange = 175f;
+                puzzle.fadeRange = 110f;
+                // 强磁吸：转到大概方向就会被吸过去，不用死抠角度
+                puzzle.assistRange = 85f;
+                puzzle.assistRate = 3.5f;
             }
 
             MemoryCuePlayer cue = go.AddComponent<MemoryCuePlayer>();
@@ -689,6 +696,12 @@ namespace Move1024.EditorTools
             os.font = font;
             os.alpha = 0.8f;
             os.charsPerSecond = 20f;
+            os.holdSeconds = 2.0f;
+
+            // 全局对话管理：所有打字机文本都必须经过它排队（同一时刻只播一条）
+            GameObject dialogueGo = new GameObject("Dialogue");
+            DialogueManager dialogue = dialogueGo.AddComponent<DialogueManager>();
+            dialogue.monologue = os;
 
             // --- 记忆穿梭白幕（放在所有面板之上） ---
             RectTransform flashRt = NewRect(canvas.transform, "Flash");
@@ -726,6 +739,7 @@ namespace Move1024.EditorTools
             rag.player = director.player != null ? director.player.transform : null;
             rag.holdAnchor = Camera.main != null ? Camera.main.transform : null;
             rag.audio = audio;
+            rag.director = director;
             rag.hoverHint = DialogueConfig.Get(DialogueKeys.RagPickupPrompt, "[F 拾取抹布]");
             if (director.dust != null) director.dust.rag = rag;
             director.rag = rag;
@@ -733,21 +747,38 @@ namespace Move1024.EditorTools
             // ---------- 第一阶段：开局抱着的纸箱 ----------
             Material cartonMat = GetOrCreateMaterial("M_Carton", new Color(0.58f, 0.47f, 0.33f), 0.05f);
             GameObject carryGo = new GameObject("Box_Carry");
-            MakeBox("Body", carryGo.transform, Vector3.zero, new Vector3(0.52f, 0.42f, 0.46f), cartonMat);
+            MakeBox("Body", carryGo.transform, Vector3.zero, new Vector3(0.64f, 0.52f, 0.58f), cartonMat);
             CarryingBox carrying = carryGo.AddComponent<CarryingBox>();
             carrying.director = director;
             carrying.player = director.player;
             carrying.holdAnchor = Camera.main != null ? Camera.main.transform : null;
             carrying.audio = audio;
 
-            // ---------- 第二阶段：地上旧物 → 放进纸箱 ----------
-            Material clutterMat = GetOrCreateMaterial("M_Tape", new Color(0.22f, 0.22f, 0.24f), 0.35f);
+            // ---------- 第二阶段：满屋子的杂物（纯干扰项，全是日常破烂） ----------
+            Material paperScrap = GetOrCreateMaterial("M_Paper", new Color(0.86f, 0.83f, 0.74f), 0.02f);
+            Material tinScrap = GetOrCreateMaterial("M_Tin", new Color(0.55f, 0.57f, 0.60f), 0.55f);
+            Material clothScrap = GetOrCreateMaterial("M_Tape", new Color(0.24f, 0.23f, 0.22f), 0.30f);
             GameObject cartonTarget = GameObject.Find("Carton_1");
 
-            CreateClutter("Clutter_A", new Vector3(-2.05f, 0.09f, -1.25f), clutterMat,
-                cross, director, audio, cartonTarget);
-            CreateClutter("Clutter_B", new Vector3(-2.48f, 0.08f, -1.62f), clutterMat,
-                cross, director, audio, cartonTarget);
+            // 地上
+            CreateClutter("PaperBall_1", new Vector3(-2.90f, 0.07f, 0.40f), Vector3.one * 0.14f, new Vector3(0f, 20f, 0f), PrimitiveType.Sphere, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("PaperBall_2", new Vector3(-1.40f, 0.07f, -1.90f), Vector3.one * 0.13f, new Vector3(10f, 50f, 0f), PrimitiveType.Sphere, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("PaperBall_3", new Vector3(1.90f, 0.07f, -2.20f), Vector3.one * 0.12f, Vector3.zero, PrimitiveType.Sphere, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Can_1", new Vector3(-2.20f, 0.09f, -0.20f), new Vector3(0.09f, 0.08f, 0.09f), new Vector3(0f, 0f, 80f), PrimitiveType.Cylinder, tinScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Can_2", new Vector3(2.40f, 0.09f, 0.20f), new Vector3(0.09f, 0.08f, 0.09f), new Vector3(0f, 0f, -70f), PrimitiveType.Cylinder, tinScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Sock_1", new Vector3(-0.60f, 0.04f, -2.40f), new Vector3(0.22f, 0.06f, 0.12f), new Vector3(0f, 35f, 0f), PrimitiveType.Cube, clothScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Sock_2", new Vector3(0.80f, 0.04f, -2.60f), new Vector3(0.20f, 0.06f, 0.11f), new Vector3(0f, -25f, 0f), PrimitiveType.Cube, clothScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Magazine_1", new Vector3(-3.20f, 0.02f, 1.60f), new Vector3(0.34f, 0.03f, 0.24f), new Vector3(0f, 15f, 0f), PrimitiveType.Cube, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Magazine_2", new Vector3(2.90f, 0.02f, 2.40f), new Vector3(0.32f, 0.03f, 0.22f), new Vector3(0f, -40f, 0f), PrimitiveType.Cube, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Bottle_1", new Vector3(-3.40f, 0.13f, -1.40f), new Vector3(0.10f, 0.13f, 0.10f), Vector3.zero, PrimitiveType.Cylinder, tinScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Cup_1", new Vector3(1.40f, 0.06f, -1.10f), new Vector3(0.09f, 0.06f, 0.09f), Vector3.zero, PrimitiveType.Cylinder, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Tissue_1", new Vector3(-1.00f, 0.02f, 0.90f), new Vector3(0.18f, 0.04f, 0.14f), new Vector3(0f, 60f, 0f), PrimitiveType.Cube, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Remote_1", new Vector3(0.50f, 0.02f, -1.60f), new Vector3(0.20f, 0.03f, 0.07f), new Vector3(0f, 10f, 0f), PrimitiveType.Cube, clothScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Cable_1", new Vector3(-2.60f, 0.02f, 2.80f), new Vector3(0.30f, 0.02f, 0.03f), new Vector3(0f, 70f, 0f), PrimitiveType.Cube, clothScrap, cross, director, audio, cartonTarget);
+
+            // 桌上两件（浮在灰层之上，一进门就能看到"这屋子很乱"）
+            CreateClutter("Newspaper_D", new Vector3(1.00f, 0.80f, 2.55f), new Vector3(0.30f, 0.02f, 0.22f), new Vector3(0f, 20f, 0f), PrimitiveType.Cube, paperScrap, cross, director, audio, cartonTarget);
+            CreateClutter("Magazine_D", new Vector3(-1.00f, 0.80f, 2.55f), new Vector3(0.28f, 0.02f, 0.20f), new Vector3(0f, -15f, 0f), PrimitiveType.Cube, paperScrap, cross, director, audio, cartonTarget);
 
             // ---------- 第三阶段：铁盒被旧衣服盖住 ----------
             GameObject lockBoxGo = GameObject.Find("LockBox");
@@ -763,6 +794,7 @@ namespace Move1024.EditorTools
                 iron.crosshair = cross;
                 iron.director = director;
                 iron.prompt = boxPrompt;
+                iron.audio = audio;
                 iron.enabled = false;        // 掀开衣服后才可用
                 boxPrompt.Clear();
 
@@ -1345,11 +1377,19 @@ namespace Move1024.EditorTools
             return t;
         }
 
-        /// <summary>地上的旧物：左键拾取、走到纸箱前放进箱子。</summary>
-        static void CreateClutter(string name, Vector3 position, Material mat,
-            CrosshairUI cross, GameFlowDirector director, AudioDirector audio, GameObject carton)
+        /// <summary>一件杂物：左键拾取、走到纸箱前左键扔进去（纯干扰项）。</summary>
+        static void CreateClutter(string name, Vector3 position, Vector3 scale, Vector3 euler,
+            PrimitiveType shape, Material mat, CrosshairUI cross, GameFlowDirector director,
+            AudioDirector audio, GameObject carton)
         {
-            GameObject go = MakeBox(name, null, position, new Vector3(0.24f, 0.14f, 0.20f), mat);
+            GameObject go = GameObject.CreatePrimitive(shape);
+            go.name = name;
+            go.transform.position = position;
+            go.transform.rotation = Quaternion.Euler(euler);
+            go.transform.localScale = scale;
+
+            Renderer r = go.GetComponent<Renderer>();
+            if (r != null) r.sharedMaterial = mat;
 
             PromptSource prompt = go.AddComponent<PromptSource>();
             ClutterPickup clutter = go.AddComponent<ClutterPickup>();
@@ -1358,6 +1398,10 @@ namespace Move1024.EditorTools
             clutter.player = director.player != null ? director.player.transform : null;
             clutter.holdAnchor = Camera.main != null ? Camera.main.transform : null;
             clutter.storeTarget = carton != null ? carton.transform : null;
+
+            // 也接受开局放下的那只搬家大纸箱
+            GameObject carriedBox = GameObject.Find("Box_Carry");
+            clutter.storeTarget2 = carriedBox != null ? carriedBox.transform : null;
             clutter.prompt = prompt;
             clutter.audio = audio;
         }

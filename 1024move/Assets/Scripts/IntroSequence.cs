@@ -105,7 +105,11 @@ namespace Move1024
 
             if (AudioDirector.Instance != null) AudioDirector.Instance.PlayTapeRip();
 
-            if (monologue != null) monologue.Say(line);
+            if (monologue != null)
+            {
+                if (DialogueManager.Instance != null) DialogueManager.Say(line);
+                else monologue.Say(line);
+            }
 
             yield return new WaitForSeconds(blackHold);
 

@@ -56,6 +56,8 @@ namespace Move1024
         public Transform player;
         [Tooltip("要离多近才能拍：设计稿要求走到电视前，这里给 2 米")]
         public float maxPlayerDistance = 2.0f;
+        [Tooltip("主线阶段锁：铁盒被发现之前电视不能玩")]
+        public GameFlowDirector director;
 
         [Header("提示")]
         public string hoverHint = "点击拍打";
@@ -108,6 +110,7 @@ namespace Move1024
         {
             if (!Input.GetMouseButtonDown(0)) return;
             if (!IsInRange) return;
+            if (director != null && !director.CanUseProps) return;
 
             Camera cam = Camera.main;
             if (cam == null) return;
@@ -131,7 +134,7 @@ namespace Move1024
 
             _clicks.Add(now);
 
-            if (audio != null) audio.PlayKnock();
+            if (audio != null) audio.PlayTvClick();
             if (!_shaking) StartCoroutine(ShakeRoutine());
 
             if (ClickCounted != null) ClickCounted(_clicks.Count, clicksRequired);
@@ -167,6 +170,7 @@ namespace Move1024
             IsLightOn = true;
             _clicks.Clear();
 
+            if (audio != null) audio.SetTvSnow(true);
             if (Fixed != null) Fixed();
             StartCoroutine(LightRoutine());
         }
@@ -201,6 +205,7 @@ namespace Move1024
             if (screenMatValid) SetScreenEmission(_screenBaseEmissive);
 
             IsLightOn = false;
+            if (audio != null) audio.SetTvSnow(false);
             if (LightExpired != null) LightExpired();
         }
 
@@ -230,6 +235,7 @@ namespace Move1024
             transform.localPosition = _baseLocalPos;
             if (spotLight != null) spotLight.intensity = 0f;
             if (screenMatValid) SetScreenEmission(_screenBaseEmissive);
+            if (audio != null) audio.SetTvSnow(false);
         }
     }
 }

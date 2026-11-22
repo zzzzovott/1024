@@ -1,23 +1,34 @@
 {
   "entries": [
-    { "id": "intro_start_box", "text": "毕业五年，第 1024 次打包……" },
+    { "id": "intro_start_box", "text": "毕业五年，第 1024 次打包。这出租屋，乱得像被打劫过一样……" },
     { "id": "box_heavy", "text": "箱子太重了，先找个空地放下吧。" },
     { "id": "box_drop_prompt", "text": "[点击 放下箱子]" },
     { "id": "box_dropped", "text": "这间屋子……也终于要清空了。" },
 
-    { "id": "clutter_pickup_prompt", "text": "[左键 拾取旧物]" },
-    { "id": "clutter_store_prompt", "text": "[左键 放进纸箱]" },
-    { "id": "clutter_stored_2", "text": "装过西装，也装过锅碗瓢盆。" },
+    { "id": "clutter_pickup_prompt", "text": "[F 拾取杂物]" },
+    { "id": "clutter_store_prompt", "text": "[F 扔进箱子]" },
+    { "id": "clutter_drop_prompt", "text": "[F 放下]" },
+    { "id": "clutter_joke_1", "text": "这个易拉罐居然还在。" },
+    { "id": "clutter_joke_2", "text": "算了，这些都扔了吧。" },
+    { "id": "clutter_joke_3", "text": "这袜子……还是别问是哪年的了。" },
+    { "id": "clutter_joke_4", "text": "旧杂志，封面都是十年前的了。" },
+    { "id": "clutter_enough", "text": "箱子差不多满了……桌上那堆旧衣服下面，好像还压着个硬东西。" },
+
+    { "id": "cloth_prompt", "text": "[左键 掀开旧衣服]" },
+    { "id": "cloth_moved", "text": "（金属碰撞声）这是什么？我什么时候有过这个？" },
+    { "id": "box_view_prompt", "text": "[点击 查看铁盒]" },
+    { "id": "lock_locked", "text": "四位密码？我什么时候设过这个……" },
+    { "id": "clues_unlocked", "text": "得找点线索——桌上那些旧东西，也许能看出点什么。" },
+
+    { "id": "prop_locked", "text": "先别急着研究这些旧东西，把这屋子收拾一下吧。" },
+    { "id": "too_far", "text": "走近一点再看。" },
+    { "id": "contract_prompt", "text": "[点击 查看退租合同]" },
 
     { "id": "rag_pickup_prompt", "text": "[F 拾取抹布]" },
     { "id": "dust_no_rag", "text": "太脏了，得先找块抹布擦擦。" },
     { "id": "dust_wipe_prompt", "text": "[按住左键 擦除桌面]" },
 
     { "id": "dust_cleared_frog", "text": "这是……小学买的铁皮青蛙？" },
-    { "id": "cloth_prompt", "text": "[左键 挪开旧衣服]" },
-    { "id": "cloth_moved", "text": "（金属碰撞声）这是什么？我什么时候有过这个？" },
-    { "id": "box_view_prompt", "text": "[点击 查看铁盒]" },
-    { "id": "lock_locked", "text": "四位数的密码锁……密码会和这些旧东西有关吗？" },
     { "id": "idle_phase3", "text": "也许该看看桌上那只青蛙，或者其他的旧物。" },
 
     { "id": "frog_hold", "text": "得找个亮一点的地方看看。" },

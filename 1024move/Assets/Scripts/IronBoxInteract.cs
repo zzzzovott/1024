@@ -9,6 +9,7 @@ namespace Move1024
         public CrosshairUI crosshair;
         public GameFlowDirector director;
         public PromptSource prompt;
+        public AudioDirector audio;
 
         [Header("规则")]
         public float maxDistance = 2.5f;
@@ -33,7 +34,8 @@ namespace Move1024
                 Vector3.Distance(director.player.transform.position, transform.position) > maxDistance) return;
 
             _nextAllowed = Time.time + repeatCooldown;
-            if (director != null) director.SayDialogue(DialogueKeys.LockLocked);
+            if (audio != null) audio.PlayMetal();
+            if (director != null) director.OnIronBoxViewed();
         }
     }
 }

@@ -18,6 +18,8 @@ namespace Move1024
         [Tooltip("持握点：通常挂在 Main Camera 下，抹布会被拿在这里")]
         public Transform holdAnchor;
         public AudioDirector audio;
+        [Tooltip("阶段锁：刚进门只能放箱子，不能捡抹布")]
+        public GameFlowDirector director;
 
         [Header("规则")]
         public float maxPlayerDistance = 2.5f;
@@ -61,6 +63,7 @@ namespace Move1024
 
             if (!IsHovered()) return;
             if (player != null && Vector3.Distance(player.position, transform.position) > maxPlayerDistance) return;
+            if (director != null && director.CurrentStage == GameFlowDirector.Stage.EnterWithBox) return;
 
             PickUp();
         }
@@ -87,7 +90,7 @@ namespace Move1024
             // 举到准心上会正好挡住中心射线（擦灰/瞄物件都会先打到布），拿在手里时先关掉碰撞
             SetColliders(false);
 
-            if (audio != null) audio.PlayClick();
+            if (audio != null) audio.PlayPickup();
             if (PickedUp != null) PickedUp();
         }
 
@@ -124,7 +127,7 @@ namespace Move1024
 
             SetColliders(true);
 
-            if (audio != null) audio.PlayClick();
+            if (audio != null) audio.PlayPickup();
             if (Dropped != null) Dropped();
         }
 

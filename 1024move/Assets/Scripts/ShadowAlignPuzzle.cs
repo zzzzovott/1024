@@ -22,13 +22,19 @@ namespace Move1024
 
         [Header("判定")]
         [Tooltip("进入磁吸/判定的角度误差")]
-        public float enterTolerance = 8f;
+        public float enterTolerance = 26f;
         [Tooltip("离开判定区的角度误差（略大于 enter，防抖）")]
-        public float exitTolerance = 11f;
+        public float exitTolerance = 30f;
         [Tooltip("磁吸范围：进入后自动吸附到谜底")]
         public bool useMagnet = true;
         [Tooltip("超过这个误差，光斑完全不亮")]
-        public float fadeRange = 70f;
+        public float fadeRange = 110f;
+
+        [Header("磁吸辅助（关键：别让玩家转半天）")]
+        [Tooltip("进入这个误差范围，物体会被慢慢吸向谜底")]
+        public float assistRange = 80f;
+        [Tooltip("吸附力度：越大越快吸上")]
+        public float assistRate = 3.2f;
 
         [Header("引用")]
         [Tooltip("实际被旋转的物体，留空则取自身")]
@@ -46,6 +52,12 @@ namespace Move1024
 
         public float CurrentError { get { return currentError; } }
         public bool IsSolved { get { return solved; } }
+
+        /// <summary>0~1 的对齐度，给 UI 显示进度用。</summary>
+        public float Similarity
+        {
+            get { return Mathf.Clamp01(1f - currentError / 60f); }
+        }
 
         float _lastProgress = -1f;
 
@@ -75,6 +87,15 @@ namespace Move1024
             }
 
             if (solved) return;
+
+            // 磁吸辅助：只要转到大方向附近，就会被慢慢"吸"向答案，不用死抠角度
+            // （只在玩家正拖着转的时候生效，避免拿着不动它自己飘到答案）
+            if (useMagnet && rotator != null && rotator.interactable && rotator.IsInteracting &&
+                currentError < assistRange && currentError > enterTolerance)
+            {
+                float strength = (1f - currentError / assistRange) * assistRate;
+                rotator.AssistToward(targetRotation, strength);
+            }
 
             float threshold = solved ? exitTolerance : enterTolerance;
             if (currentError <= threshold)

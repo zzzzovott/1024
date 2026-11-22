@@ -5,6 +5,7 @@ Shader "Move1024/UIBlur"
 {
     Properties
     {
+        [PerRendererData] _MainTex ("Sprite Texture", 2D) = "white" {}
         _Color ("Tint", Color) = (0.02, 0.02, 0.035, 0.72)
         _BlurSize ("Blur Size", Range(0, 12)) = 3.0
     }

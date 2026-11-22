@@ -12,8 +12,8 @@ namespace Move1024
         public AudioDirector audio;
 
         [Header("持握")]
-        public Vector3 holdLocalPosition = new Vector3(0f, -0.10f, 0.85f);
-        public float holdScale = 0.42f;
+        public Vector3 holdLocalPosition = new Vector3(0.02f, -0.30f, 1.22f);
+        public float holdScale = 1.25f;
 
         [Header("规则")]
         public float heavyHintDelay = 5f;     // 抱着 5 秒还没放下就催一句
@@ -81,7 +81,7 @@ namespace Move1024
             if (hit.normal.y < 0.5f) return;                                  // 只放水平面
             if (player != null && hit.collider.transform.IsChildOf(player.transform)) return;
 
-            _dropPoint = hit.point + hit.normal * 0.21f;                       // 箱子有厚度
+            _dropPoint = hit.point + hit.normal * 0.27f;                       // 箱子有厚度
             _dropRot = Quaternion.FromToRotation(Vector3.up, hit.normal);
             _hasDropTarget = true;
         }
@@ -95,15 +95,15 @@ namespace Move1024
             transform.SetParent(null, true);                                   // 回到场景根
             transform.position = _dropPoint;
             transform.rotation = _dropRot;
-            transform.localScale = Vector3.one * 0.45f;
+            transform.localScale = Vector3.one;   // 放下就是真实尺寸（约 0.5 米见方）
 
             SetColliders(true);
 
             CrosshairUI crosshair = CrosshairUI.Active;
             if (crosshair != null) crosshair.SetGlobalPrompt("");
 
-            if (audio != null) audio.PlayTapeRip();
-            if (director != null) director.SayDialogue(DialogueKeys.BoxDropped);
+            if (audio != null) audio.PlayBoxDrop();
+            if (director != null) director.OnBoxDropped();   // 推进到"整理杂物"阶段
         }
 
         void SetColliders(bool enabled)

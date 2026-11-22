@@ -86,7 +86,13 @@ namespace Move1024
 
         public const string ClutterPickupPrompt = "clutter_pickup_prompt";
         public const string ClutterStorePrompt = "clutter_store_prompt";
+        public const string ClutterDropPrompt = "clutter_drop_prompt";
         public const string ClutterStored2 = "clutter_stored_2";
+        public const string ClutterEnough = "clutter_enough";
+        public const string PropLocked = "prop_locked";
+        public const string TooFar = "too_far";
+        public const string CluesUnlocked = "clues_unlocked";
+        public const string ContractPrompt = "contract_prompt";
 
         public const string RagPickupPrompt = "rag_pickup_prompt";
         public const string DustNoRag = "dust_no_rag";
